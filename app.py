@@ -153,5 +153,3 @@ else:
     st.info("😕 No offers available right now. Keep shopping to unlock rewards!")
 
 
-else:
-    st.info("📤 Please upload an Excel or CSV file to start.")
