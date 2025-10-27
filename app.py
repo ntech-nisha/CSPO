@@ -134,16 +134,24 @@ if uploaded_file is not None:
             st.write("### 📦 Product Frequency, Bought Dates & Offers:")
             st.dataframe(freq_products)
 
-            # -------------------------
-            # 🎉 Personalized Offer Display
-            # -------------------------
-            st.markdown("---")
-            offers_available = freq_products['Offer'].unique().tolist()
-            offers_text = ", ".join(set(offers_available) - {"🔴 No Offer (Watch)"})
-            if offers_text:
-                st.success(f"🎉 Congratulations! You got the offer: **{offers_text}**")
-            else:
-                st.info("😕 No offers available right now. Keep shopping to unlock rewards!")
+ # -------------------------
+# 🎉 Personalized Offer Display
+# -------------------------
+st.markdown("---")
+offers_available = freq_products['Offer'].unique().tolist()
+offers_text = ", ".join(set(offers_available) - {"🔴 No Offer (Watch)"})
+
+if offers_text:
+    st.success(f"🎉 Congratulations! You got the offer: **{offers_text}**")
+
+    # Show detailed offers table
+    st.write("### 💰 Detailed Offers for You:")
+    offer_summary = freq_products[['Product', 'Frequency', 'Offer']].copy()
+    st.dataframe(offer_summary)
+
+else:
+    st.info("😕 No offers available right now. Keep shopping to unlock rewards!")
+
 
 else:
     st.info("📤 Please upload an Excel or CSV file to start.")
