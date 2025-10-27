@@ -141,7 +141,7 @@ st.markdown("---")
 offers_available = freq_products['Offer'].unique().tolist()
 offers_text = ", ".join(set(offers_available) - {"🔴 No Offer (Watch)"})
 
-if offers_text
+if offers_text:
     st.success(f"🎉 Congratulations! You got the offer: **{offers_text}**")
 
     # Show detailed offers table
@@ -153,5 +153,5 @@ else
     st.info("😕 No offers available right now. Keep shopping to unlock rewards!")
 
 
-else
+else:
     st.info("📤 Please upload an Excel or CSV file to start.")
