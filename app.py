@@ -149,7 +149,7 @@ if offers_text:
     offer_summary = freq_products[['Product', 'Frequency', 'Offer']].copy()
     st.dataframe(offer_summary)
 
-else
+else:
     st.info("😕 No offers available right now. Keep shopping to unlock rewards!")
 
 
