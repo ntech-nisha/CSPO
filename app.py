@@ -16,27 +16,27 @@ import numpy as np
 from datetime import datetime
 from sklearn.preprocessing import StandardScaler
 from sklearn.cluster import KMeans
-
 import plotly.express as px
 
 # -------------------------
-# 1️⃣ Page Config
+# 1️⃣ PAGE CONFIG
 # -------------------------
 st.set_page_config(page_title="Customer Personalized Offers", layout="wide")
 st.title("🛍️ Customer Personalized Offers Dashboard")
 
 # -------------------------
-# 2️⃣ File Upload
+# 2️⃣ FILE UPLOAD
 # -------------------------
-uploaded_file = st.file_uploader("Upload your Excel or CSV file", type=["xlsx","csv"])
+uploaded_file = st.file_uploader("Upload your Excel or CSV file", type=["xlsx", "csv"])
+
 if uploaded_file is not None:
     if uploaded_file.name.endswith('.csv'):
         df = pd.read_csv(uploaded_file)
     else:
         df = pd.read_excel(uploaded_file)
 
-    st.success("File uploaded successfully!")
-    st.write("Preview of your data:")
+    st.success("✅ File uploaded successfully!")
+    st.write("### 👀 Preview of your data:")
     st.dataframe(df.head())
 
     # -------------------------
@@ -57,39 +57,57 @@ if uploaded_file is not None:
     # 4️⃣ KMEANS CLUSTERING
     # -------------------------
     scaler = StandardScaler()
-    rfm_scaled = scaler.fit_transform(rfm[['Recency','Frequency','Monetary']])
+    rfm_scaled = scaler.fit_transform(rfm[['Recency', 'Frequency', 'Monetary']])
     kmeans = KMeans(n_clusters=4, random_state=42)
     rfm['Cluster'] = kmeans.fit_predict(rfm_scaled)
 
-    st.subheader("📊 RFM Clusters Visualization")
-    fig = px.scatter_3d(rfm, x='Recency', y='Frequency', z='Monetary',
-                        color='Cluster', hover_data=['CustomerID'])
-    st.plotly_chart(fig, use_container_width=True)
+    # -------------------------
+    # 5️⃣ VISUALIZATIONS
+    # -------------------------
+    st.subheader("📊 3D Cluster Visualization (RFM)")
+    fig3d = px.scatter_3d(
+        rfm, x='Recency', y='Frequency', z='Monetary',
+        color='Cluster', hover_data=['CustomerID']
+    )
+    st.plotly_chart(fig3d, use_container_width=True)
+
+    # ---- Separate Bar Graphs ----
+    st.subheader("📈 Recency by Cluster")
+    fig_r = px.bar(rfm, x='Cluster', y='Recency', color='Cluster', title="Recency by Cluster")
+    st.plotly_chart(fig_r, use_container_width=True)
+
+    st.subheader("📈 Frequency by Cluster")
+    fig_f = px.bar(rfm, x='Cluster', y='Frequency', color='Cluster', title="Frequency by Cluster")
+    st.plotly_chart(fig_f, use_container_width=True)
+
+    st.subheader("📈 Monetary by Cluster")
+    fig_m = px.bar(rfm, x='Cluster', y='Monetary', color='Cluster', title="Monetary by Cluster")
+    st.plotly_chart(fig_m, use_container_width=True)
 
     # -------------------------
-    # 5️⃣ CUSTOMER DETAIL LOOKUP
+    # 6️⃣ CUSTOMER DETAIL LOOKUP
     # -------------------------
-    st.subheader("🔍 Customer Lookup")
+    st.subheader("🔍 Customer Lookup & Personalized Offer")
     customer_id_input = st.text_input("Enter Customer ID:")
 
     if customer_id_input:
-        customer_id_input = int(customer_id_input) if customer_id_input.isnumeric() else customer_id_input
+        try:
+            customer_id_input = int(customer_id_input)
+        except:
+            pass
+
         customer_data = df[df['Customer ID'] == customer_id_input]
 
         if customer_data.empty:
-            st.warning("Customer ID not found in the dataset.")
+            st.warning("⚠️ Customer ID not found in the dataset.")
         else:
-            # Column 1: All products bought
             products_bought = customer_data['Description'].tolist()
 
-            # Column 2: Frequent products with frequency
+            # Product frequency
             freq_products = customer_data['Description'].value_counts().reset_index()
             freq_products.columns = ['Product', 'Frequency']
 
-            # Column 3: Stock status
-            freq_products['Stock'] = 'Out of Stock'
-
-            # Column 4: Offer eligibility
+            # Offer logic (No stock column)
             def offer(f):
                 if f >= 5:
                     return "🟢 Big Discount (20%)"
@@ -102,19 +120,30 @@ if uploaded_file is not None:
 
             freq_products['Offer'] = freq_products['Frequency'].apply(offer)
 
-            # Column 5: Bought Dates
+            # Purchase dates
             def bought_dates(prod):
                 rows = customer_data[customer_data['Description'] == prod]
                 return rows['InvoiceDate'].dt.strftime('%Y-%m-%d').tolist()
 
             freq_products['Bought Dates'] = freq_products['Product'].apply(bought_dates)
 
-            # Display tables
-            st.write("**All Products Bought:**")
+            # Display customer info
+            st.write("### 🛒 All Products Bought:")
             st.write(products_bought)
 
-            st.write("**Product Frequency, Bought Dates, Stock & Offer Eligibility:**")
+            st.write("### 📦 Product Frequency, Bought Dates & Offers:")
             st.dataframe(freq_products)
 
+            # -------------------------
+            # 🎉 Personalized Offer Display
+            # -------------------------
+            st.markdown("---")
+            offers_available = freq_products['Offer'].unique().tolist()
+            offers_text = ", ".join(set(offers_available) - {"🔴 No Offer (Watch)"})
+            if offers_text:
+                st.success(f"🎉 Congratulations! You got the offer: **{offers_text}**")
+            else:
+                st.info("😕 No offers available right now. Keep shopping to unlock rewards!")
+
 else:
-    st.info("Please upload an Excel or CSV file to start.")
+    st.info("📤 Please upload an Excel or CSV file to start.")
