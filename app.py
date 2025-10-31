@@ -7,13 +7,11 @@ Original file is located at
     https://colab.research.google.com/drive/1Zz13J7DGH8oOigICLSX3_-z1PO36NGa-
 """
  
-# =========================================
-# CUSTOMER PERSONALIZED OFFERS - STREAMLIT GUI
-# =========================================
+# ✅ COMPLETE STREAMLIT PROGRAM: CUSTOMER PERSONALIZED OFFERS DASHBOARD
+# =============================================================
 import streamlit as st
 import pandas as pd
 import numpy as np
-from datetime import datetime
 from sklearn.preprocessing import StandardScaler
 from sklearn.cluster import KMeans
 import plotly.express as px
@@ -27,7 +25,7 @@ st.title("🛍️ Customer Personalized Offers Dashboard")
 # -------------------------
 # 2️⃣ FILE UPLOAD
 # -------------------------
-uploaded_file = st.file_uploader("Upload your Excel or CSV file", type=["xlsx", "csv"])
+uploaded_file = st.file_uploader("Upload your Excel or CSV file", type=["xlsx","csv"])
 
 if uploaded_file is not None:
     if uploaded_file.name.endswith('.csv'):
@@ -64,28 +62,33 @@ if uploaded_file is not None:
     # -------------------------
     # 5️⃣ VISUALIZATIONS
     # -------------------------
-    st.subheader("📊 3D Cluster Visualization (RFM)")
+    st.subheader("📊 RFM Clusters Visualization (3D View)")
     fig3d = px.scatter_3d(
         rfm, x='Recency', y='Frequency', z='Monetary',
         color='Cluster', hover_data=['CustomerID']
     )
     st.plotly_chart(fig3d, use_container_width=True)
 
-    # ---- Separate Bar Graphs ----
-    st.subheader("📈 Recency by Cluster")
-    fig_r = px.bar(rfm, x='Cluster', y='Recency', color='Cluster', title="Recency by Cluster")
-    st.plotly_chart(fig_r, use_container_width=True)
+    st.subheader("📈 Average RFM Values per Cluster")
+    rfm_mean = rfm.groupby('Cluster')[['Recency', 'Frequency', 'Monetary']].mean().reset_index()
+    fig_rfm_bar = px.bar(
+        rfm_mean.melt(id_vars='Cluster', var_name='Metric', value_name='Value'),
+        x='Cluster', y='Value', color='Metric', barmode='group',
+        title="RFM Average Values by Cluster"
+    )
+    st.plotly_chart(fig_rfm_bar, use_container_width=True)
 
-    st.subheader("📈 Frequency by Cluster")
-    fig_f = px.bar(rfm, x='Cluster', y='Frequency', color='Cluster', title="Frequency by Cluster")
-    st.plotly_chart(fig_f, use_container_width=True)
-
-    st.subheader("📈 Monetary by Cluster")
-    fig_m = px.bar(rfm, x='Cluster', y='Monetary', color='Cluster', title="Monetary by Cluster")
-    st.plotly_chart(fig_m, use_container_width=True)
+    st.subheader("👥 Number of Customers per Cluster")
+    cluster_counts = rfm['Cluster'].value_counts().reset_index()
+    cluster_counts.columns = ['Cluster', 'CustomerCount']
+    fig_cluster_bar = px.bar(
+        cluster_counts, x='Cluster', y='CustomerCount', color='Cluster',
+        title="Customers Distribution per Cluster"
+    )
+    st.plotly_chart(fig_cluster_bar, use_container_width=True)
 
     # -------------------------
-    # 6️⃣ CUSTOMER DETAIL LOOKUP
+    # 6️⃣ CUSTOMER DETAIL LOOKUP + BILLING
     # -------------------------
     st.subheader("🔍 Customer Lookup & Personalized Offer")
     customer_id_input = st.text_input("Enter Customer ID:")
@@ -101,59 +104,67 @@ if uploaded_file is not None:
         if customer_data.empty:
             st.warning("⚠️ Customer ID not found in the dataset.")
         else:
-            # All products bought
             products_bought = customer_data['Description'].tolist()
 
-            # Product frequency
             freq_products = customer_data['Description'].value_counts().reset_index()
             freq_products.columns = ['Product', 'Frequency']
 
-            # Offer logic (No stock column)
+            # -------------------------
+            # ✏️ Editable Discount Inputs in GUI
+            # -------------------------
+            st.subheader("✏️ Set Discount Values")
+            big_discount = st.number_input("Enter Big Discount % (frequency >= 5)", min_value=0, max_value=100, value=20)
+            medium_discount = st.number_input("Enter Medium Discount % (frequency >= 3)", min_value=0, max_value=100, value=10)
+            small_discount = st.number_input("Enter Small Discount % (frequency == 2)", min_value=0, max_value=100, value=5)
+
+            # Offer logic using editable discounts
             def offer(f):
                 if f >= 5:
-                    return "🟢 Big Discount (20%)"
+                    return f"🟢 Big Discount ({big_discount}%)"
                 elif f >= 3:
-                    return "🟡 Medium Discount (10%)"
+                    return f"🟡 Medium Discount ({medium_discount}%)"
                 elif f == 2:
-                    return "🟠 Small Discount (5%)"
+                    return f"🟠 Small Discount ({small_discount}%)"
                 else:
                     return "🔴 No Offer (Watch)"
 
             freq_products['Offer'] = freq_products['Frequency'].apply(offer)
 
-            # Purchase dates
+            # Purchased dates
             def bought_dates(prod):
                 rows = customer_data[customer_data['Description'] == prod]
                 return rows['InvoiceDate'].dt.strftime('%Y-%m-%d').tolist()
 
             freq_products['Bought Dates'] = freq_products['Product'].apply(bought_dates)
 
-            # Display customer info
-            st.write("### 🛒 All Products Bought:")
-            st.write(products_bought)
-
             st.write("### 📦 Product Frequency, Bought Dates & Offers:")
             st.dataframe(freq_products)
 
             # -------------------------
-            # 🎉 Personalized Offer Display
+            # BILLING SECTION
             # -------------------------
-            st.markdown("---")
-            offers_available = freq_products['Offer'].unique().tolist()
-            offers_text = ", ".join(set(offers_available) - {"🔴 No Offer (Watch)"})
+            st.markdown("### 🧾 Final Billing with Discount")
 
-            if offers_text:
-                st.success(f"🎉 Congratulations! You got the offer: **{offers_text}**")
+            # Final price calculation
+            freq_products['FinalPrice'] = freq_products.apply(
+                lambda row: row['Frequency'] * df[df['Description'] == row['Product']]['Price'].iloc[0], axis=1
+            )
 
-                # Show detailed offers table
-                st.write("### 💰 Detailed Offers for You:")
-                offer_summary = freq_products[['Product', 'Frequency', 'Offer']].copy()
-                st.dataframe(offer_summary)
-            else:
-                st.info("😕 No offers available right now. Keep shopping to unlock rewards!")
+            # Apply discount
+            def apply_discount(row):
+                if "Big" in row['Offer']:
+                    return row['FinalPrice'] * (1 - (big_discount / 100))
+                elif "Medium" in row['Offer']:
+                    return row['FinalPrice'] * (1 - (medium_discount / 100))
+                elif "Small" in row['Offer']:
+                    return row['FinalPrice'] * (1 - (small_discount / 100))
+                else:
+                    return row['FinalPrice']
+
+            freq_products['AfterDiscount'] = freq_products.apply(apply_discount, axis=1)
+
+            st.dataframe(freq_products[['Product', 'Frequency', 'Offer', 'FinalPrice', 'AfterDiscount']])
 
 else:
     st.info("📤 Please upload an Excel or CSV file to start.")
-
-
 
