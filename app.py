@@ -160,12 +160,10 @@ if uploaded_file is not None:
                 else:
                     return row['FinalPrice']
 
-            freq_products['AfterDiscount'] = freq_products.apply(apply_discount, axis=1).round(2)
+            freq_products['AfterDiscount'] = freq_products.apply(apply_discount, axis=1).round(0).astype(int)
 
             st.dataframe(freq_products[['Product', 'Frequency', 'Offer', 'FinalPrice', 'AfterDiscount']])
 
 else:
     st.info("📤 Please upload an Excel or CSV file to start.")
-
-
 
