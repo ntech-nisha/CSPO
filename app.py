@@ -8,87 +8,96 @@ Original file is located at
 """
 import streamlit as st
 import pandas as pd
+import numpy as np
+from datetime import datetime
+from sklearn.preprocessing import StandardScaler
+from sklearn.cluster import KMeans
+import plotly.express as px
 
-# -------------------------
-# Page Config
-# -------------------------
-st.set_page_config(page_title="Customer Personalized Offers", layout="wide")
-st.title("🛍️ Customer Personalized Offers Dashboard (India Billing Version)")
+# ------------------ PAGE CONFIG ------------------
+st.set_page_config(page_title="Customer RFM + Billing Dashboard", layout="wide")
+st.title("🛍️ Customer RFM Analysis + Billing System (India Based)")
 
-# -------------------------
-# File Upload
-# -------------------------
-uploaded_file = st.file_uploader("Upload Excel/CSV customer purchase file", type=["xlsx", "csv"])
-if uploaded_file is not None:
-    if uploaded_file.name.endswith(".csv"):
-        df = pd.read_csv(uploaded_file)
-    else:
-        df = pd.read_excel(uploaded_file)
+# ------------------ SIDEBAR DISCOUNT SETTINGS ------------------
+st.sidebar.header("🔧 Offer / Discount Settings")
+big_discount = st.sidebar.number_input("Big Customer Discount (%)", min_value=0, max_value=100, value=30)
+medium_discount = st.sidebar.number_input("Medium Customer Discount (%)", min_value=0, max_value=100, value=20)
+small_discount = st.sidebar.number_input("Small Customer Discount (%)", min_value=0, max_value=100, value=10)
 
-    st.success("✅ File Uploaded Successfully!")
+# ------------------ FILE UPLOAD ------------------
+st.header("1️⃣ Upload Sales File (CSV or Excel)")
+uploaded_file = st.file_uploader("Upload your sales dataset", type=["csv", "xlsx"])
 
-    # Show dataset preview
-    st.subheader("📊 Data Preview")
-    st.dataframe(df.head())
+def clean_column(col):
+    return col.strip().replace(" ", "").lower()
 
-    # ----------------------------------------------------------------
-    # Offer Section - Select product and enter/edit discount %
-    # ----------------------------------------------------------------
-    st.subheader("🎯 Offer & Discount Section")
+if uploaded_file:
+    df = pd.read_csv(uploaded_file) if uploaded_file.name.endswith("csv") else pd.read_excel(uploaded_file)
+    df.columns = [clean_column(c) for c in df.columns]
 
-    if "Offer" not in df.columns:
-        df["Offer"] = "Default Offer"
+    # required mapping
+    mapping = {
+        "invoicedate": ["invoice_date", "date"],
+        "customerid": ["customer_id", "cid", "custid"],
+        "stockcode": ["productcode", "sku"],
+        "description": ["product", "itemname", "productname"],
+        "quantity": ["qty", "count"],
+        "unitprice": ["price", "rate", "unit_price"],
+    }
 
-    products = df["Product"].unique().tolist()
-    selected_product = st.selectbox("Select Product", products)
+    for key, options in mapping.items():
+        if key not in df.columns:
+            for opt in options:
+                if opt in df.columns:
+                    df.rename(columns={opt: key}, inplace=True)
+                    break
 
-    current_discount = df.loc[df["Product"] == selected_product, "Discount"].iloc[0] \
-        if "Discount" in df.columns else 20
+    st.success("✅ File uploaded & columns mapped successfully")
 
-    discount_input = st.number_input(
-        f"Enter Discount % for {selected_product}",
-        min_value=0, max_value=90, value=int(current_discount)
-    )
+    # ------------------ RFM CALCULATION ------------------
+    st.header("2️⃣ RFM Visualization")
+    df['invoicedate'] = pd.to_datetime(df['invoicedate'])
+    snapshot_date = df['invoicedate'].max() + pd.Timedelta(days=1)
 
-    # Update discount back to dataframe
-    df.loc[df["Product"] == selected_product, "Discount"] = discount_input
+    rfm = df.groupby('customerid').agg({
+        'invoicedate': lambda x: (snapshot_date - x.max()).days,
+        'stockcode': 'count',
+        'unitprice': lambda x: (x.sum())
+    }).reset_index()
 
-    st.info(f"✅ Discount updated to: {discount_input}%")
+    rfm.columns = ['customerid', 'Recency', 'Frequency', 'Monetary']
+    scaler = StandardScaler()
+    rfm_scaled = scaler.fit_transform(rfm[['Recency','Frequency','Monetary']])
 
-    # ----------------------------------------------------------------
-    # BILLING SECTION (INDIAN RUPEES — NO FLOAT)
-    # ----------------------------------------------------------------
-    st.subheader("🧾 Billing Section (₹ in Whole Rupees — No Paise)")
+    kmeans = KMeans(n_clusters=3, random_state=42)
+    rfm['Cluster'] = kmeans.fit_predict(rfm_scaled)
 
-    qty = st.number_input("Enter Quantity", min_value=1, value=1)
+    fig = px.scatter_3d(rfm, x='Recency', y='Frequency', z='Monetary', color='Cluster', height=500)
+    st.plotly_chart(fig, use_container_width=True)
 
-    product_price = df.loc[df["Product"] == selected_product, "Price"].iloc[0]
+    # ------------------ CUSTOMER PRODUCT LOOKUP ------------------
+    st.header("3️⃣ Enter Customer ID to View Purchased Products")
 
-    # ============================================================
-    # INDIA STYLE DISCOUNT CALCULATION (INTEGER ONLY)
-    # ============================================================
-    discount_amount = int((product_price * discount_input) / 100)     # ALWAYS INTEGER
-    final_price = int(product_price - discount_amount) * qty          # ALWAYS INTEGER
+    entered_id = st.text_input("Enter Customer ID")
+    if entered_id:
+        cust_df = df[df['customerid'].astype(str) == entered_id]
+        if not cust_df.empty:
+            st.subheader("🛒 Products Purchased")
+            st.dataframe(cust_df[['stockcode','description','quantity','unitprice']])
 
-    st.write("------")
-    st.write(f"✅ **Original Price:** ₹ {product_price}")
-    st.write(f"✅ **Discount Applied:** {discount_input}%")
-    st.write(f"✅ **Discount Amount:** ₹ {discount_amount} (Rounded to rupees)")
-    st.write(f"💰 **Final Price:** ₹ {final_price} (After discount)")
+            cluster = rfm[rfm['customerid'].astype(str) == entered_id]['Cluster'].values[0]
+            discount = small_discount if cluster == 2 else medium_discount if cluster == 1 else big_discount
 
-    st.write("------")
+            st.info(f"Customer Segment: **Cluster {cluster}** → Discount Applied: **{discount}%**")
 
-    # ----------------------------------------------------------------
-    # Download updated excel with discounts
-    # ----------------------------------------------------------------
-    updated_file = df.to_csv(index=False).encode("utf-8")
-    st.download_button(
-        label="⬇️ Download Updated File (CSV)",
-        data=updated_file,
-        file_name="updated_discounts.csv",
-        mime="text/csv"
-    )
+            # Billing
+            cust_df['Amount'] = cust_df['quantity'] * cust_df['unitprice']
+            cust_df['Discount Amount'] = cust_df['Amount'] * (discount / 100)
+            cust_df['Final Amount'] = cust_df['Amount'] - cust_df['Discount Amount']
 
-else:
-    st.warning("📂 Please upload a file to continue.")
-
+            total = int(cust_df['Final Amount'].sum())  # INR rounding
+            st.subheader("🧾 Final Bill (₹ - Indian Rupees)")
+            st.dataframe(cust_df[['stockcode','description','quantity','unitprice','Amount','Discount Amount','Final Amount']])
+            st.success(f"✅ Total Payable Amount: **₹ {total}**")
+        else:
+            st.error("❌ Customer ID not found.")
