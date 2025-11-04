@@ -110,7 +110,7 @@ if uploaded_file:
     # log scale + standardization
     rfm_clust = rfm.copy()
     rfm_clust["Recency"].fillna(rfm_clust["Recency"].median(), inplace=True)
-    rfm_clust["R_log"], rfm_clust["F_log"], rfm_clust["M_log"] = np.log1p(rfm_clust[["Recency", "Frequency", "Monetary"]]).T
+    rfm_clust[["R_log", "F_log", "M_log"]] = np.log1p(rfm_clust[["Recency", "Frequency", "Monetary"]])
 
     X = StandardScaler().fit_transform(rfm_clust[["R_log", "F_log", "M_log"]])
     rfm["Cluster"] = KMeans(n_clusters=n_clusters, random_state=42, n_init=10).fit_predict(X)
