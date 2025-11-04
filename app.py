@@ -7,7 +7,7 @@ Original file is located at
     https://colab.research.google.com/drive/1Zz13J7DGH8oOigICLSX3_-z1PO36NGa-
 """
 # ===========================================================
-# CUSTOMER RFM + OFFER + BILLING DASHBOARD (FULL PROGRAM)
+# CUSTOMER RFM + BILLING DASHBOARD (EXCEL UPLOAD + KMEANS + VISUALS + PRODUCT DISCOUNT)
 # ===========================================================
 
 import streamlit as st
@@ -15,108 +15,89 @@ import pandas as pd
 import numpy as np
 from datetime import datetime
 from sklearn.cluster import KMeans
+import plotly.express as px
 
-st.set_page_config(page_title="Customer RFM + Offer + Billing", layout="wide")
-st.title("🛍️ Customer RFM + Offer + Billing Dashboard (India)")
-
-# -----------------------------------------------------------
-# DEFAULT OFFER %
-# User can edit these during runtime
-# -----------------------------------------------------------
-default_offers = {
-    "High Value (Cluster 0)": 20,
-    "Medium Value (Cluster 1)": 10,
-    "Low Value (Cluster 2)": 5
-}
-
-st.sidebar.header("🔧 Offer Configuration")
-
-for key in default_offers:
-    default_offers[key] = st.sidebar.number_input(f"{key} Discount %", value=default_offers[key], step=1)
+st.set_page_config(page_title="Customer RFM + Billing Dashboard", layout="wide")
+st.title("🛍️ Customer RFM + Billing Dashboard (India)")
 
 # -----------------------------------------------------------
-# FILE UPLOAD
+# FILE UPLOAD (CSV / EXCEL)
 # -----------------------------------------------------------
-file = st.file_uploader("Upload CSV file (transactions)", type=["csv"])
+file = st.file_uploader("Upload Transaction File (CSV / Excel)", type=["csv", "xlsx", "xls"])
 
 if file:
-    df = pd.read_csv(file)
+    # Detect file type
+    if file.name.endswith(".csv"):
+        df = pd.read_csv(file)
+    else:
+        df = pd.read_excel(file)
 
     # Validate required columns
-    required_columns = {"CustomerID", "InvoiceDate", "Amount"}
-    if not required_columns.issubset(df.columns):
-        st.error(f"CSV must contain columns: {required_columns}")
+    required_cols = {"CustomerID", "InvoiceDate", "Amount"}
+    if not required_cols.issubset(df.columns):
+        st.error(f"Uploaded file must contain columns: {required_cols}")
         st.stop()
 
     df["InvoiceDate"] = pd.to_datetime(df["InvoiceDate"])
 
     # -----------------------------------------------------------
-    # RFM Calculation
+    # RFM CALCULATION
     # -----------------------------------------------------------
     ref_date = df["InvoiceDate"].max() + pd.Timedelta(days=1)
 
     rfm = df.groupby("CustomerID").agg({
-        "InvoiceDate": lambda x: (ref_date - x.max()).days,   # Recency
-        "CustomerID": "count",                               # Frequency
-        "Amount": "sum"                                      # Monetary
+        "InvoiceDate": lambda x: (ref_date - x.max()).days,  # Recency
+        "CustomerID": "count",                              # Frequency
+        "Amount": "sum"                                     # Monetary
     }).rename(columns={"InvoiceDate": "Recency", "CustomerID": "Frequency", "Amount": "Monetary"})
 
-    # -----------------------------------------------------------
-    # ✅ FIX ADDED: prevent NaN/Inf crash during Clustering
-    # -----------------------------------------------------------
+    # ✅ Prevent NaN / Infinity crash for KMeans
     X = rfm[["Recency", "Frequency", "Monetary"]]
-    X = X.replace([np.inf, -np.inf], np.nan)  # Replace infinity
-    X = X.fillna(0)                           # Fill NaN with 0
+    X = X.replace([np.inf, -np.inf], np.nan)
+    X = X.fillna(0)
 
-    # Apply KMeans
+    # -----------------------------------------------------------
+    # APPLY KMEANS CLUSTERING
+    # -----------------------------------------------------------
     kmeans = KMeans(n_clusters=3, random_state=42)
-    rfm['Cluster'] = kmeans.fit_predict(X)
+    rfm["Cluster"] = kmeans.fit_predict(X)
 
-    st.subheader("📊 Customer Segmentation Result (RFM Clusters)")
+    st.subheader("📊 RFM + Cluster Table")
     st.dataframe(rfm)
 
     # -----------------------------------------------------------
-    # 📊 RFM Bar Graph (Cluster Count)
+    # RFM CHARTS / VISUALIZATION
     # -----------------------------------------------------------
-    st.subheader("📈 Cluster Distribution (Bar Graph)")
-
-    cluster_counts = rfm['Cluster'].value_counts().sort_index()
+    st.subheader("📈 Customer Count per Cluster (Bar Graph)")
+    cluster_counts = rfm["Cluster"].value_counts().sort_index()
     st.bar_chart(cluster_counts)
 
+    st.subheader("🟢 Monetary vs Frequency (Scatter)")
+    fig = px.scatter(rfm, x="Monetary", y="Frequency", color="Cluster", title="Frequency vs Monetary (Clustered)")
+    st.plotly_chart(fig)
+
     # -----------------------------------------------------------
-    # BILLING SECTION
+    # BILLING - PRODUCT BASED DISCOUNT (MANUALLY EDITABLE)
     # -----------------------------------------------------------
-    st.header("🧾 Billing System (Product Level Discount)")
+    st.header("🧾 Billing System – Product Based Discount (Editable)")
 
-    customer_ids = rfm.index.tolist()
-    selected_customer = st.selectbox("Select Customer", customer_ids)
-    customer_cluster = rfm.loc[selected_customer, "Cluster"]
-
-    offer_map = {0: "High Value (Cluster 0)", 1: "Medium Value (Cluster 1)", 2: "Low Value (Cluster 2)"}
-    applied_offer_type = offer_map.get(customer_cluster, "Low Value (Cluster 2)")
-    applied_discount = default_offers[applied_offer_type]
-
-    st.write(f"🎉 Customer belongs to: **{applied_offer_type}**")
-    st.write(f"✅ Discount applied: **{applied_discount}%**")
-
-    st.subheader("Add Products to Bill")
-
+    num_products = st.number_input("How many products?", min_value=1, step=1)
     product_data = []
-    num_products = st.number_input("Number of Products", min_value=1, step=1)
 
     for i in range(num_products):
         p_name = st.text_input(f"Product {i+1} Name", key=f"name_{i}")
         p_price = st.number_input(f"Product {i+1} Price (₹)", min_value=0, step=1, key=f"price_{i}")
 
-        # ✅ India Billing: Ensure discount remains integer rupees
-        discount_amount = int((p_price * applied_discount) / 100)
+        # ✅ User enters discount % (not auto applied)
+        p_discount = st.number_input(f"Discount % for Product {i+1}", min_value=0, max_value=100, step=1, key=f"disc_{i}")
+
+        discount_amount = int((p_price * p_discount) / 100)
         final_price = p_price - discount_amount
 
-        product_data.append([p_name, p_price, discount_amount, final_price])
+        product_data.append([p_name, p_price, p_discount, discount_amount, final_price])
 
     if st.button("Generate Bill"):
-        bill_df = pd.DataFrame(product_data, columns=["Product Name", "Price (₹)", "Discount (₹)", "Final Price (₹)"])
+        bill_df = pd.DataFrame(product_data, columns=["Product Name", "Price (₹)", "Discount %", "Discount (₹)", "Final Price (₹)"])
         st.subheader("💰 Final Bill")
         st.dataframe(bill_df)
-
-        st.success("Bill generated successfully ✅")
+        st.success("✅ Bill Generated Successfully")
