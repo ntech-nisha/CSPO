@@ -101,8 +101,8 @@ if uploaded:
 
     st.success("✅ RFM clustering & visualization completed.")
 
-   # ==========================================================================================
-#  ✅ CUSTOMER ID DISCOUNT SCREEN (PERCENTAGE → RUPEES CONVERSION)
+# ==========================================================================================
+# ✅ CUSTOMER ID DISCOUNT SCREEN (PERCENTAGE → RUPEES CONVERSION)  — FIXED VERSION
 # ==========================================================================================
 
 st.subheader("💳 Customer Discount Based on Frequency & Offer Type")
@@ -122,22 +122,44 @@ if customer_id_input:
         st.warning("⚠️ No records found for this Customer ID")
         st.stop()
 
-    # Calculate frequency
-    freq = len(cust_df)
+    # ✅ Calculate product-wise frequency
+    cust_grouped = (
+        cust_df.groupby("Product")
+        .agg({
+            "Amount": "sum",
+            "InvoiceDate": lambda x: ', '.join(x.dt.strftime("%Y-%m-%d").unique()),
+            "Product": "count"
+        })
+    ).rename(columns={"Product": "Frequency"}).reset_index()
 
-    # Offer Type Rules
-    if freq >= 5:
-        offer_type = "Big Discount"
-    elif freq >= 3:
-        offer_type = "Medium Discount"
-    else:
-        offer_type = "Small Discount"
+    # ✅ Offer type based on frequency of that product
+    def offer_type(freq):
+        if freq >= 5:
+            return "Big Discount"
+        elif freq >= 3:
+            return "Medium Discount"
+        else:
+            return "Small Discount"
 
-    cust_df_display = cust_df[["Product", "Amount", "InvoiceDate"]]
-    cust_df_display["Frequency"] = freq
-    cust_df_display["Offer Type"] = offer_type
+    cust_grouped["Offer Type"] = cust_grouped["Frequency"].apply(offer_type)
 
-    st.write("### 🧾 Customer Purchase Details")
-    st.dataframe(cust_df_display)
+    st.write("### 🧾 Customer Purchase Details (Product wise frequency)")
+    st.dataframe(cust_grouped)
+
+    # ✅ User entering discount percentage (editable)
+    discount_percent = st.number_input(
+        "✏️ Enter Discount Percentage (%)",
+        min_value=0, max_value=100, step=1
+    )
+
+    total_amount = cust_grouped["Amount"].sum()
+
+    discount_rupees = (total_amount * discount_percent) / 100
+    final_amount = total_amount - discount_rupees
+
+    st.write(f"### 💰 Total Amount            : ₹ {total_amount:,.2f}")
+    st.write(f"### 🏷 Discount ({discount_percent}%) : ₹ {discount_rupees:,.2f}")
+    st.write(f"### ✅ Final Payable Amount      : ₹ {final_amount:,.2f}")
+
 
     
