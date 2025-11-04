@@ -117,45 +117,69 @@ st.header("2️⃣ RFM Calculation & Visuals")
 if df["InvoiceDate"].notna().any():
     snapshot = df["InvoiceDate"].max() + pd.Timedelta(days=1)
     rfm = df.groupby("CustomerID").agg({
-        "InvoiceDate": lambda x: (snapshot - x.max()).days,
-        "Product": "count",
-        "TotalAmount": "sum"
+        "InvoiceDate": lambda x: (snapshot - x.max()).days,   # Recency
+        "Product": "count",                                   # Frequency
+        "TotalAmount": "sum"                                  # Monetary
     }).reset_index().rename(columns={"InvoiceDate": "Recency", "Product": "Frequency", "TotalAmount": "Monetary"})
 else:
-    rfm = df.groupby("CustomerID").agg({"Product": "count", "TotalAmount": "sum"}).reset_index().rename(columns={"Product":"Frequency","TotalAmount":"Monetary"})
+    # If dataset does not contain InvoiceDate
+    rfm = df.groupby("CustomerID").agg({
+        "Product": "count",
+        "TotalAmount": "sum"
+    }).reset_index().rename(columns={"Product": "Frequency", "TotalAmount": "Monetary"})
     rfm["Recency"] = np.nan
 
-# fill recency for clustering
+
+# ✅ FIX FOR KMEANS (IMPORTANT!)
 rfm_clust = rfm.copy()
-rfm_clust["Recency"].fillna(rfm_clust["Recency"].median() if rfm_clust["Recency"].notna().any() else 0, inplace=True)
+
+# Fill NaN values - prevents "Input X contains NaN" error
+rfm_clust["Recency"] = rfm_clust["Recency"].fillna(rfm_clust["Recency"].median() if rfm_clust["Recency"].notna().any() else 0)
+rfm_clust["Frequency"] = rfm_clust["Frequency"].fillna(0)
+rfm_clust["Monetary"] = rfm_clust["Monetary"].fillna(0)
+
+# Log transform (better clustering)
 rfm_clust["R_log"] = np.log1p(rfm_clust["Recency"])
 rfm_clust["F_log"] = np.log1p(rfm_clust["Frequency"])
 rfm_clust["M_log"] = np.log1p(rfm_clust["Monetary"])
 
+# Scaling
 scaler = StandardScaler()
 X = scaler.fit_transform(rfm_clust[["R_log", "F_log", "M_log"]])
 
+# KMeans clustering
 kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
 rfm_clust["Cluster"] = kmeans.fit_predict(X)
 
+# Merge cluster results
 rfm = rfm.merge(rfm_clust[["CustomerID", "Cluster"]], on="CustomerID", how="left")
 
+
+# Show cluster summary table (optional)
 if show_cluster_table:
     st.subheader("Cluster Summary (mean values)")
     st.dataframe(rfm.groupby("Cluster").mean().round(2))
 
-# 3D scatter
+# ✅ 3D scatter
 st.subheader("3D RFM Scatter")
-fig3d = px.scatter_3d(rfm, x="Recency", y="Frequency", z="Monetary", color="Cluster",
-                      hover_name="CustomerID", width=900, height=600)
+fig3d = px.scatter_3d(
+    rfm, x="Recency", y="Frequency", z="Monetary",
+    color="Cluster", hover_name="CustomerID",
+    width=900, height=600
+)
 st.plotly_chart(fig3d, use_container_width=True)
 
-# single bar graph (one by one) - R or F or M
-st.subheader("View single R / F / M bar graph")
+# ✅ One-by-one R / F / M bar chart
+st.subheader("View Single R / F / M Bar Graph")
 which = st.radio("Choose metric to show (one-by-one)", ["Recency", "Frequency", "Monetary"])
-bar_fig = px.bar(rfm.sort_values(by=which, ascending=False).head(50), x="CustomerID", y=which,
-                 labels={"CustomerID":"Customer ID", which: which}, height=400)
+bar_fig = px.bar(
+    rfm.sort_values(by=which, ascending=False).head(50),
+    x="CustomerID", y=which,
+    labels={"CustomerID": "Customer ID", which: which},
+    height=400
+)
 st.plotly_chart(bar_fig, use_container_width=True)
+
 
 # -------------------------
 # 3) Customer lookup -> billing with editable discounts
