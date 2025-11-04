@@ -7,187 +7,150 @@ Original file is located at
     https://colab.research.google.com/drive/1Zz13J7DGH8oOigICLSX3_-z1PO36NGa-
 """
 
-# =====================================================================================
-# STREAMLIT APP — CUSTOMER RFM + EDITABLE OFFER SYSTEM + BILLING (FINAL VERSION)
-# =====================================================================================
+# ===========================================================
+# CUSTOMER RFM + OFFER + BILLING DASHBOARD (FULL PROGRAM)
+# ===========================================================
 
 import streamlit as st
 import pandas as pd
-import numpy as np
-from sklearn.preprocessing import StandardScaler
+from datetime import datetime
 from sklearn.cluster import KMeans
-import plotly.express as px
 
-# -------------------------------------------------------------------------------------
-# PAGE CONFIG
-# -------------------------------------------------------------------------------------
-st.set_page_config(page_title="Customer RFM + Billing", layout="wide")
-st.title("🛍️ Customer RFM + Editable Offer + Billing Dashboard (India)")
+st.set_page_config(page_title="Customer RFM + Offer + Billing", layout="wide")
 
-# -------------------------------------------------------------------------------------
-# SIDEBAR — Editable Offer Logic
-# -------------------------------------------------------------------------------------
-st.sidebar.header("⚙️ OFFER DISCOUNT SETTINGS")
+st.title("🛍️ Customer RFM + Offer + Billing Dashboard (India)")
 
-big_offer_pct = st.sidebar.number_input("Big Offer % (Frequency ≥ 5)", 0, 100, 30)
-medium_offer_pct = st.sidebar.number_input("Medium Offer % (Frequency ≥ 3)", 0, 100, 20)
-small_offer_pct = st.sidebar.number_input("Small Offer % (Frequency ≥ 2)", 0, 100, 10)
-no_offer_pct = st.sidebar.number_input("No Offer % (Frequency < 2)", 0, 100, 0)
 
-DEFAULT_OFFER_PCTS = {
-    "Big Offer": int(big_offer_pct),
-    "Medium Offer": int(medium_offer_pct),
-    "Small Offer": int(small_offer_pct),
-    "No Offer": int(no_offer_pct)
-}
+# -----------------------------------------------------------
+# DEFAULT OFFER %
+# User can edit these during runtime
+# -----------------------------------------------------------
+if "offer_dict" not in st.session_state:
+    st.session_state.offer_dict = {
+        "Big Offer": 30,
+        "Medium Offer": 20,
+        "Small Offer": 10,
+        "No Offer": 0
+    }
 
-k_clusters = st.sidebar.slider("KMeans Clusters (K)", 2, 8, 4)
-show_cluster_table = st.sidebar.checkbox("Show Cluster Table Summary")
 
-# -------------------------------------------------------------------------------------
-# FILE UPLOAD
-# -------------------------------------------------------------------------------------
-st.header("1️⃣ Upload Dataset (CSV / Excel)")
-uploaded = st.file_uploader("Upload Sales Data File", type=["csv", "xlsx"])
+# -----------------------------------------------------------
+# Sidebar: Offer editing functionality
+# -----------------------------------------------------------
+st.sidebar.header("✏ Edit Offer Percentage (%)")
 
-if uploaded:
-    if uploaded.name.endswith(".csv"):
-        df = pd.read_csv(uploaded, dtype=str)
-    else:
-        df = pd.read_excel(uploaded, dtype=str)
-
-    # Cleaning column names
-    df.columns = [c.strip() for c in df.columns]
-
-    # Mapping dataset cols
-    df.rename(columns={
-        "Customer ID": "CustomerID",
-        "Description": "Product",
-        "Price": "UnitPrice"
-    }, inplace=True)
-
-    df["Quantity"] = pd.to_numeric(df["Quantity"], errors="coerce").fillna(1).astype(int)
-    df["UnitPrice"] = pd.to_numeric(df["UnitPrice"], errors="coerce").fillna(0)
-    df["InvoiceDate"] = pd.to_datetime(df["InvoiceDate"], errors="coerce")
-
-    df["TotalAmount"] = df["Quantity"] * df["UnitPrice"]
-
-    st.success("✅ File Loaded Successfully!")
-    st.dataframe(df.head())
-
-    # -------------------------------------------------------------------------------------
-    # 2️⃣ RFM CALCULATION + CLUSTERING
-    # -------------------------------------------------------------------------------------
-    st.header("2️⃣ RFM Segmentation (Recency–Frequency–Monetary)")
-
-    snapshot_date = df["InvoiceDate"].max() + pd.Timedelta(days=1)
-
-    rfm = df.groupby("CustomerID").agg({
-        "InvoiceDate": lambda x: (snapshot_date - x.max()).days,
-        "StockCode": "count",
-        "TotalAmount": "sum"
-    }).reset_index()
-
-    rfm.columns = ["CustomerID", "Recency", "Frequency", "Monetary"]
-
-    # log + scale
-    rfm_norm = rfm.copy()
-    rfm_norm[["R_log", "F_log", "M_log"]] = np.log1p(rfm_norm[["Recency", "Frequency", "Monetary"]])
-    X = StandardScaler().fit_transform(rfm_norm[["R_log", "F_log", "M_log"]])
-
-    # clustering
-    rfm["Cluster"] = KMeans(n_clusters=k_clusters, random_state=42, n_init=10).fit_predict(X)
-
-    if show_cluster_table:
-        st.subheader("📊 Cluster Summary Table")
-        st.dataframe(rfm.groupby("Cluster")[["Recency", "Frequency", "Monetary"]].mean().round(2))
-
-    fig = px.scatter_3d(
-        rfm, x="Recency", y="Frequency", z="Monetary",
-        color="Cluster", hover_data=["CustomerID"],
-        title="🎯 RFM - 3D Cluster Visualization"
+for key in st.session_state.offer_dict.keys():
+    st.session_state.offer_dict[key] = st.sidebar.number_input(
+        f"{key} (%)",
+        min_value=0,
+        max_value=100,
+        step=1,
+        value=st.session_state.offer_dict[key]
     )
-    st.plotly_chart(fig, use_container_width=True)
-
-    # -------------------------------------------------------------------------------------
-    # 3️⃣ CUSTOMER OFFER + BILLING SECTION
-    # -------------------------------------------------------------------------------------
-    st.header("3️⃣ Customer Offer + Billing System")
-
-    cust_id = st.text_input("Enter Customer ID")
-
-    if cust_id:
-        st.subheader(f"🧾 Purchase History for Customer: {cust_id}")
-
-        cust_df = df[df["CustomerID"] == cust_id]
-        if cust_df.empty:
-            st.error("❌ No records found for this Customer ID")
-        else:
-            # Frequency of each product purchased
-            freq_products = cust_df.groupby("Product").agg({
-                "Quantity": "sum",
-                "InvoiceDate": lambda x: ", ".join(x.dt.date.astype(str))
-            }).reset_index().rename(columns={"Quantity": "Frequency", "InvoiceDate": "Purchase Dates"})
-
-            # offer assignment based on frequency
-            def assign_offer(freq):
-                if freq >= 5: return "Big Offer"
-                if freq >= 3: return "Medium Offer"
-                if freq >= 2: return "Small Offer"
-                return "No Offer"
-
-            freq_products["Eligible Offer"] = freq_products["Frequency"].apply(assign_offer)
-            st.table(freq_products)
-
-            st.success("🎉 Congratulations! Customer has Special Offers")
-
-            # BILLING UI
-            st.subheader("💳 Billing Entry")
-
-            product = st.selectbox("Select Product", freq_products["Product"].unique())
-            qty = st.number_input("Quantity", min_value=1, step=1)
-
-            # auto-read unit price from dataset
-            price = df[df["Product"] == product]["UnitPrice"].iloc[0]
-
-            # show editable discount option
-            offer_selected = st.selectbox(
-                "Select/Change Offer", list(DEFAULT_OFFER_PCTS.keys())
-            )
-
-            discount_pct = DEFAULT_OFFER_PCTS[offer_selected]
-            total = price * qty
-            discount_amt = int(total * (discount_pct / 100))
-            final = total - discount_amt
-
-            st.write(f"""
-            **Unit Price:** ₹{price}  
-            **Discount:** {discount_pct}% → ₹{discount_amt}  
-            **Final Price:** ✅ ₹{final}
-            """)
-
-            if st.button("Add To Bill"):
-                if "invoice" not in st.session_state:
-                    st.session_state["invoice"] = []
-
-                st.session_state["invoice"].append(
-                    [product, qty, offer_selected, price, discount_amt, final]
-                )
-
-    # display invoice table
-    if "invoice" in st.session_state and len(st.session_state["invoice"]) > 0:
-        st.subheader("🧾 Final Invoice")
-        invoice_df = pd.DataFrame(
-            st.session_state["invoice"],
-            columns=["Product", "Qty", "Offer", "UnitPrice", "Discount", "Final Price"]
-        )
-        st.table(invoice_df)
-
-        if st.button("Calculate Grand Total"):
-            st.success(f"💰 Grand Total: ₹ {invoice_df['Final Price'].sum()}")
 
 
-else:
-    st.info("⬆️ Upload a file to begin.")
+# -----------------------------------------------------------
+# File Upload
+# -----------------------------------------------------------
+uploaded_file = st.file_uploader("📤 Upload your CSV customer dataset", type=["csv"])
+if uploaded_file is None:
+    st.info("➡ Please upload dataset to continue...")
+    st.stop()
+
+
+df = pd.read_csv(uploaded_file)
+
+required_cols = ["CustomerID", "InvoiceNo", "InvoiceDate", "Quantity", "UnitPrice", "Description"]
+for col in required_cols:
+    if col not in df.columns:
+        st.error(f"❌ Missing column: {col}")
+        st.stop()
+
+df["InvoiceDate"] = pd.to_datetime(df["InvoiceDate"])
+df["TotalAmount"] = df["Quantity"] * df["UnitPrice"]
+
+
+# -----------------------------------------------------------
+# RFM Calculation
+# -----------------------------------------------------------
+snapshot_date = df["InvoiceDate"].max() + pd.Timedelta(days=1)
+
+rfm = df.groupby("CustomerID").agg({
+    "InvoiceDate": lambda x: (snapshot_date - x.max()).days,
+    "InvoiceNo": "nunique",
+    "TotalAmount": "sum"
+}).reset_index()
+
+rfm.columns = ["CustomerID", "Recency", "Frequency", "Monetary"]
+
+
+# -----------------------------------------------------------
+# KMeans Segmentation using Frequency (to give offers)
+# -----------------------------------------------------------
+kmeans = KMeans(n_clusters=4, random_state=42)
+rfm["Cluster"] = kmeans.fit_predict(rfm[["Frequency"]])
+
+rfm["Offer Category"] = rfm["Cluster"].map({
+    0: "Small Offer",
+    1: "Medium Offer",
+    2: "Big Offer",
+    3: "No Offer"
+})
+
+
+# -----------------------------------------------------------
+# Merge Offer %
+# -----------------------------------------------------------
+rfm["Discount %"] = rfm["Offer Category"].map(st.session_state.offer_dict)
+
+st.subheader("📊 Customer RFM + Offer Table")
+st.dataframe(rfm, use_container_width=True)
+
+
+# -----------------------------------------------------------
+# BILLING SYSTEM
+# -----------------------------------------------------------
+st.subheader("🧾 Billing System")
+
+cid = st.text_input("Enter Customer ID for Billing")
+
+if cid:
+    if not cid.isnumeric() or int(cid) not in rfm["CustomerID"].values:
+        st.error("❌ Customer not found")
+    else:
+        cid = int(cid)
+
+        st.success("✅ Customer Found!")
+
+        customer_data = df[df["CustomerID"] == cid].copy()
+        customer_rfm = rfm[rfm["CustomerID"] == cid].iloc[0]
+
+        # Show product summary
+        product_summary = customer_data.groupby("Description").agg({"Quantity": "sum"}).reset_index()
+
+        st.write("🛒 Product Purchase Summary")
+        st.dataframe(product_summary, use_container_width=True)
+
+        st.write(f"""
+        **🎉 Congratulations! You got {customer_rfm['Offer Category']} ({customer_rfm['Discount %']}% OFF)**  
+        - Frequency of Buying: **{customer_rfm['Frequency']} times**
+        - Last Purchase was **{customer_rfm['Recency']} days ago**
+        """)
+
+        # Billing Calculation
+        total_bill = customer_data["TotalAmount"].sum()
+
+        discount_rs = (total_bill * int(customer_rfm["Discount %"])) // 100  # only integer rupees
+        final_bill = total_bill - discount_rs
+
+        st.markdown("---")
+        st.subheader("💰 Final Billing Summary (INR)")
+
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Total Amount", f"₹ {int(total_bill)}")
+        col2.metric("Discount Applied", f"₹ {int(discount_rs)}")
+        col3.metric("Final Amount", f"₹ {int(final_bill)}")
+
+        st.success("✅ Billing Completed!")
 
 
