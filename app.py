@@ -7,10 +7,10 @@ Original file is located at
     https://colab.research.google.com/drive/1Zz13J7DGH8oOigICLSX3_-z1PO36NGa-
 """
 
+# =====================================================================================
+# STREAMLIT APP — CUSTOMER RFM + EDITABLE OFFER SYSTEM + BILLING (FINAL VERSION)
+# =====================================================================================
 
-# =======================================================
-# CUSTOMER RFM + OFFER + BILLING DASHBOARD (INDIA)
-# =======================================================
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -18,144 +18,176 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.cluster import KMeans
 import plotly.express as px
 
-st.set_page_config(page_title="Customer RFM + Offers & Billing", layout="wide")
-st.title("🛍️ Customer RFM + Offer Recommendation + Billing Dashboard")
+# -------------------------------------------------------------------------------------
+# PAGE CONFIG
+# -------------------------------------------------------------------------------------
+st.set_page_config(page_title="Customer RFM + Billing", layout="wide")
+st.title("🛍️ Customer RFM + Editable Offer + Billing Dashboard (India)")
 
-#--------------------------
-# Helper: Auto detect column
-#--------------------------
-def find_col(df, names):
-    for col in df.columns:
-        if col.lower() in [n.lower() for n in names]:
-            return col
-    return None
+# -------------------------------------------------------------------------------------
+# SIDEBAR — Editable Offer Logic
+# -------------------------------------------------------------------------------------
+st.sidebar.header("⚙️ OFFER DISCOUNT SETTINGS")
 
-# Offer logic
-def get_offer(frequency):
-    if frequency >= 5:
-        return "Big Offer"
-    elif frequency >= 3:
-        return "Medium Offer"
-    elif frequency == 2:
-        return "Small Offer"
-    else:
-        return "No Offer"
+big_offer_pct = st.sidebar.number_input("Big Offer % (Frequency ≥ 5)", 0, 100, 30)
+medium_offer_pct = st.sidebar.number_input("Medium Offer % (Frequency ≥ 3)", 0, 100, 20)
+small_offer_pct = st.sidebar.number_input("Small Offer % (Frequency ≥ 2)", 0, 100, 10)
+no_offer_pct = st.sidebar.number_input("No Offer % (Frequency < 2)", 0, 100, 0)
 
-OFFER_DISCOUNT = {
-    "Big Offer": 30,
-    "Medium Offer": 20,
-    "Small Offer": 10,
-    "No Offer": 0
+DEFAULT_OFFER_PCTS = {
+    "Big Offer": int(big_offer_pct),
+    "Medium Offer": int(medium_offer_pct),
+    "Small Offer": int(small_offer_pct),
+    "No Offer": int(no_offer_pct)
 }
 
-# -------------------------
-# UPLOAD DATA
-# -------------------------
-uploaded = st.file_uploader("Upload CSV/Excel File", type=["csv", "xlsx"])
+k_clusters = st.sidebar.slider("KMeans Clusters (K)", 2, 8, 4)
+show_cluster_table = st.sidebar.checkbox("Show Cluster Table Summary")
+
+# -------------------------------------------------------------------------------------
+# FILE UPLOAD
+# -------------------------------------------------------------------------------------
+st.header("1️⃣ Upload Dataset (CSV / Excel)")
+uploaded = st.file_uploader("Upload Sales Data File", type=["csv", "xlsx"])
 
 if uploaded:
-    df = pd.read_csv(uploaded) if uploaded.name.endswith(".csv") else pd.read_excel(uploaded)
+    if uploaded.name.endswith(".csv"):
+        df = pd.read_csv(uploaded, dtype=str)
+    else:
+        df = pd.read_excel(uploaded, dtype=str)
 
-    st.success("✅ File uploaded")
+    # Cleaning column names
+    df.columns = [c.strip() for c in df.columns]
+
+    # Mapping dataset cols
+    df.rename(columns={
+        "Customer ID": "CustomerID",
+        "Description": "Product",
+        "Price": "UnitPrice"
+    }, inplace=True)
+
+    df["Quantity"] = pd.to_numeric(df["Quantity"], errors="coerce").fillna(1).astype(int)
+    df["UnitPrice"] = pd.to_numeric(df["UnitPrice"], errors="coerce").fillna(0)
+    df["InvoiceDate"] = pd.to_datetime(df["InvoiceDate"], errors="coerce")
+
+    df["TotalAmount"] = df["Quantity"] * df["UnitPrice"]
+
+    st.success("✅ File Loaded Successfully!")
     st.dataframe(df.head())
 
-    # Auto detect important fields
-    invoice_col = find_col(df, ["InvoiceNo", "Invoice Number"])
-    date_col = find_col(df, ["InvoiceDate", "Date"])
-    customer_col = find_col(df, ["CustomerID", "Customer Id"])
-    product_col = find_col(df, ["Description", "Product", "Item"])
-    amount_col = find_col(df, ["Amount", "Price", "TotalAmount"])
+    # -------------------------------------------------------------------------------------
+    # 2️⃣ RFM CALCULATION + CLUSTERING
+    # -------------------------------------------------------------------------------------
+    st.header("2️⃣ RFM Segmentation (Recency–Frequency–Monetary)")
 
-    if not all([invoice_col, date_col, customer_col, product_col, amount_col]):
-        st.error("❌ Required columns not found!")
-        st.stop()
-
-    # Clean dataframe
-    df = df[[invoice_col, date_col, customer_col, product_col, amount_col]].copy()
-    df.columns = ["InvoiceNo", "InvoiceDate", "CustomerID", "Product", "Amount"]
-    df["InvoiceDate"] = pd.to_datetime(df["InvoiceDate"])
-
-    # -------------------------
-    # RFM MODelling
-    # -------------------------
-    snapshot = df["InvoiceDate"].max() + pd.Timedelta(days=1)
+    snapshot_date = df["InvoiceDate"].max() + pd.Timedelta(days=1)
 
     rfm = df.groupby("CustomerID").agg({
-        "InvoiceDate": lambda x: (snapshot - x.max()).days,
-        "InvoiceNo": "count",
-        "Amount": "sum"
+        "InvoiceDate": lambda x: (snapshot_date - x.max()).days,
+        "StockCode": "count",
+        "TotalAmount": "sum"
     }).reset_index()
 
     rfm.columns = ["CustomerID", "Recency", "Frequency", "Monetary"]
 
-    # scale and cluster
-    rfm_scaled = StandardScaler().fit_transform(np.log1p(rfm[["Recency", "Frequency", "Monetary"]]))
-    kmeans = KMeans(n_clusters=4, random_state=42, n_init=10)
-    rfm["Cluster"] = kmeans.fit_predict(rfm_scaled)
+    # log + scale
+    rfm_norm = rfm.copy()
+    rfm_norm[["R_log", "F_log", "M_log"]] = np.log1p(rfm_norm[["Recency", "Frequency", "Monetary"]])
+    X = StandardScaler().fit_transform(rfm_norm[["R_log", "F_log", "M_log"]])
 
-    # 3D CLUSTER GRAPH
-    st.subheader("📊 3D RFM Clustering Visualization")
+    # clustering
+    rfm["Cluster"] = KMeans(n_clusters=k_clusters, random_state=42, n_init=10).fit_predict(X)
+
+    if show_cluster_table:
+        st.subheader("📊 Cluster Summary Table")
+        st.dataframe(rfm.groupby("Cluster")[["Recency", "Frequency", "Monetary"]].mean().round(2))
+
     fig = px.scatter_3d(
-        rfm,
-        x=np.log1p(rfm["Recency"]),
-        y=np.log1p(rfm["Frequency"]),
-        z=np.log1p(rfm["Monetary"]),
-        color="Cluster",
-        opacity=0.85,
-        title="RFM Clusters (3D View)"
+        rfm, x="Recency", y="Frequency", z="Monetary",
+        color="Cluster", hover_data=["CustomerID"],
+        title="🎯 RFM - 3D Cluster Visualization"
     )
     st.plotly_chart(fig, use_container_width=True)
 
-    st.subheader("📌 Enter Customer ID to view Offer & Product Details")
+    # -------------------------------------------------------------------------------------
+    # 3️⃣ CUSTOMER OFFER + BILLING SECTION
+    # -------------------------------------------------------------------------------------
+    st.header("3️⃣ Customer Offer + Billing System")
 
-    # USER ENTERS CUSTOMER ID TO VIEW OFFER DETAILS
-    cid = st.text_input("Enter Customer ID:")
+    cust_id = st.text_input("Enter Customer ID")
 
-    if cid:
-        customer_df = df[df["CustomerID"] == cid]
+    if cust_id:
+        st.subheader(f"🧾 Purchase History for Customer: {cust_id}")
 
-        if customer_df.empty:
-            st.error("❌ Customer ID not found")
+        cust_df = df[df["CustomerID"] == cust_id]
+        if cust_df.empty:
+            st.error("❌ No records found for this Customer ID")
         else:
-            product_summary = customer_df.groupby("Product").agg({
-                "InvoiceNo": "count",
-                "InvoiceDate": lambda dates: ", ".join(sorted(dates.dt.strftime("%d-%b-%Y").unique()))
-            }).reset_index()
+            # Frequency of each product purchased
+            freq_products = cust_df.groupby("Product").agg({
+                "Quantity": "sum",
+                "InvoiceDate": lambda x: ", ".join(x.dt.date.astype(str))
+            }).reset_index().rename(columns={"Quantity": "Frequency", "InvoiceDate": "Purchase Dates"})
 
-            product_summary.columns = ["Product", "Frequency", "PurchaseDates"]
-            product_summary["Offer"] = product_summary["Frequency"].apply(get_offer)
+            # offer assignment based on frequency
+            def assign_offer(freq):
+                if freq >= 5: return "Big Offer"
+                if freq >= 3: return "Medium Offer"
+                if freq >= 2: return "Small Offer"
+                return "No Offer"
 
-            st.subheader("🎁 Customer Purchase & Offer Details")
-            st.dataframe(product_summary)
+            freq_products["Eligible Offer"] = freq_products["Frequency"].apply(assign_offer)
+            st.table(freq_products)
 
-            st.success("✅ Congratulations! Offers are applied based on your purchase history.")
+            st.success("🎉 Congratulations! Customer has Special Offers")
 
-            # BILLING SECTION
-            st.subheader("💵 Billing System")
+            # BILLING UI
+            st.subheader("💳 Billing Entry")
 
-            selected_product = st.selectbox("Select Product", product_summary["Product"])
-            base_price = st.number_input("Enter Product Price (₹)", min_value=1)
+            product = st.selectbox("Select Product", freq_products["Product"].unique())
             qty = st.number_input("Quantity", min_value=1, step=1)
 
-            product_offer = product_summary.loc[
-                product_summary["Product"] == selected_product, "Offer"
-            ].values[0]
+            # auto-read unit price from dataset
+            price = df[df["Product"] == product]["UnitPrice"].iloc[0]
 
-            discount_percent = OFFER_DISCOUNT[product_offer]
+            # show editable discount option
+            offer_selected = st.selectbox(
+                "Select/Change Offer", list(DEFAULT_OFFER_PCTS.keys())
+            )
 
-            if st.button("Generate Bill"):
-                total = base_price * qty
-                discount_amount = round(total * discount_percent / 100)  # integer discount
-                final = total - discount_amount
+            discount_pct = DEFAULT_OFFER_PCTS[offer_selected]
+            total = price * qty
+            discount_amt = int(total * (discount_pct / 100))
+            final = total - discount_amt
 
-                st.success(f"""
-                **Product:** {selected_product}  
-                **Offer Applied:** {product_offer} ({discount_percent}% OFF)  
-                **Total Price:** ₹{total}  
-                **Discount:** ₹{discount_amount}  
-                ✅ **Final Amount to Pay: ₹{final}**
-                """)
+            st.write(f"""
+            **Unit Price:** ₹{price}  
+            **Discount:** {discount_pct}% → ₹{discount_amt}  
+            **Final Price:** ✅ ₹{final}
+            """)
+
+            if st.button("Add To Bill"):
+                if "invoice" not in st.session_state:
+                    st.session_state["invoice"] = []
+
+                st.session_state["invoice"].append(
+                    [product, qty, offer_selected, price, discount_amt, final]
+                )
+
+    # display invoice table
+    if "invoice" in st.session_state and len(st.session_state["invoice"]) > 0:
+        st.subheader("🧾 Final Invoice")
+        invoice_df = pd.DataFrame(
+            st.session_state["invoice"],
+            columns=["Product", "Qty", "Offer", "UnitPrice", "Discount", "Final Price"]
+        )
+        st.table(invoice_df)
+
+        if st.button("Calculate Grand Total"):
+            st.success(f"💰 Grand Total: ₹ {invoice_df['Final Price'].sum()}")
+
 
 else:
-    st.info("📂 Please upload dataset to continue.")
+    st.info("⬆️ Upload a file to begin.")
+
 
