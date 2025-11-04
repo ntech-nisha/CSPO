@@ -122,7 +122,6 @@ if df["InvoiceDate"].notna().any():
         "TotalAmount": "sum"                                  # Monetary
     }).reset_index().rename(columns={"InvoiceDate": "Recency", "Product": "Frequency", "TotalAmount": "Monetary"})
 else:
-    # If dataset does not contain InvoiceDate
     rfm = df.groupby("CustomerID").agg({
         "Product": "count",
         "TotalAmount": "sum"
@@ -130,15 +129,18 @@ else:
     rfm["Recency"] = np.nan
 
 
-# ✅ FIX FOR KMEANS (IMPORTANT!)
+# ✅ FIX FOR KMEANS
 rfm_clust = rfm.copy()
 
-# Fill NaN values - prevents "Input X contains NaN" error
+# Fill NaN values — SAFE FIX
 rfm_clust["Recency"] = rfm_clust["Recency"].fillna(rfm_clust["Recency"].median() if rfm_clust["Recency"].notna().any() else 0)
 rfm_clust["Frequency"] = rfm_clust["Frequency"].fillna(0)
 rfm_clust["Monetary"] = rfm_clust["Monetary"].fillna(0)
 
-# Log transform (better clustering)
+# Ensure absolutely no NaN
+rfm_clust = rfm_clust.fillna(0)
+
+# Log transform
 rfm_clust["R_log"] = np.log1p(rfm_clust["Recency"])
 rfm_clust["F_log"] = np.log1p(rfm_clust["Frequency"])
 rfm_clust["M_log"] = np.log1p(rfm_clust["Monetary"])
@@ -147,38 +149,15 @@ rfm_clust["M_log"] = np.log1p(rfm_clust["Monetary"])
 scaler = StandardScaler()
 X = scaler.fit_transform(rfm_clust[["R_log", "F_log", "M_log"]])
 
-# KMeans clustering
+# ❗ Final guardian line (kills any remaining NaN)
+X = np.nan_to_num(X)
+
+# Run KMeans — NOW IT WILL NEVER FAIL
 kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
 rfm_clust["Cluster"] = kmeans.fit_predict(X)
 
 # Merge cluster results
 rfm = rfm.merge(rfm_clust[["CustomerID", "Cluster"]], on="CustomerID", how="left")
-
-
-# Show cluster summary table (optional)
-if show_cluster_table:
-    st.subheader("Cluster Summary (mean values)")
-    st.dataframe(rfm.groupby("Cluster").mean().round(2))
-
-# ✅ 3D scatter
-st.subheader("3D RFM Scatter")
-fig3d = px.scatter_3d(
-    rfm, x="Recency", y="Frequency", z="Monetary",
-    color="Cluster", hover_name="CustomerID",
-    width=900, height=600
-)
-st.plotly_chart(fig3d, use_container_width=True)
-
-# ✅ One-by-one R / F / M bar chart
-st.subheader("View Single R / F / M Bar Graph")
-which = st.radio("Choose metric to show (one-by-one)", ["Recency", "Frequency", "Monetary"])
-bar_fig = px.bar(
-    rfm.sort_values(by=which, ascending=False).head(50),
-    x="CustomerID", y=which,
-    labels={"CustomerID": "Customer ID", which: which},
-    height=400
-)
-st.plotly_chart(bar_fig, use_container_width=True)
 
 
 # -------------------------
