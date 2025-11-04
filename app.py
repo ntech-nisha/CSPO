@@ -15,7 +15,6 @@ import numpy as np
 from sklearn.preprocessing import StandardScaler
 from sklearn.cluster import KMeans
 import plotly.express as px
-import matplotlib.pyplot as plt
 
 st.set_page_config(page_title="Customer RFM + Billing (India)", layout="wide")
 st.title("🛍️ Customer RFM + Indian Billing Dashboard")
