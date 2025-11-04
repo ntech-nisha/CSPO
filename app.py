@@ -8,7 +8,7 @@ Original file is located at
 """
 
 
-          # app.py
+  # app.py
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -26,30 +26,21 @@ def find_col(df, candidates):
     for c in candidates:
         if c in df.columns:
             return c
-    # try case-insensitive match
     lower_cols = {col.lower(): col for col in df.columns}
     for c in candidates:
         if c.lower() in lower_cols:
             return lower_cols[c.lower()]
     return None
 
-def safe_to_int_series(s):
-    # try to convert series to int where possible
-    try:
-        if pd.api.types.is_integer_dtype(s):
-            return s.astype(int)
-        # remove .0 when reading floats which actually are ints
-        return pd.to_numeric(s, errors='coerce').round(0).astype('Int64')
-    except Exception:
-        return s.astype(str)
 
 # -------------------------
-# Sidebar: discount & clustering settings
+# Sidebar Settings
 # -------------------------
 st.sidebar.header("⚙️ Settings")
-big_discount = st.sidebar.number_input("Big Discount % (freq >= 5)", min_value=0, max_value=100, value=20, step=1)
-medium_discount = st.sidebar.number_input("Medium Discount % (freq >= 3)", min_value=0, max_value=100, value=10, step=1)
-small_discount = st.sidebar.number_input("Small Discount % (freq == 2)", min_value=0, max_value=100, value=5, step=1)
+big_discount = st.sidebar.number_input("Big Discount % (freq > 5)", min_value=0, max_value=100, value=20, step=1)
+medium_discount = st.sidebar.number_input("Medium Discount % (freq > 3)", min_value=0, max_value=100, value=10, step=1)
+small_discount = st.sidebar.number_input("Small Discount % (freq > 2)", min_value=0, max_value=100, value=5, step=1)
+
 n_clusters = st.sidebar.slider("K (clusters for KMeans)", min_value=2, max_value=8, value=4)
 show_cluster_table = st.sidebar.checkbox("Show cluster summary table", value=False)
 
@@ -60,312 +51,194 @@ st.header("1️⃣ Upload sales/transactions file (CSV or Excel)")
 uploaded_file = st.file_uploader("Upload CSV / XLSX file", type=["csv", "xlsx"])
 
 if uploaded_file:
-    # load file
+
     if uploaded_file.name.lower().endswith(".csv"):
         df = pd.read_csv(uploaded_file, dtype=str)
     else:
         df = pd.read_excel(uploaded_file, dtype=str)
 
-    # strip whitespace from column names
     df.columns = [c.strip() for c in df.columns]
 
-    # Map columns with flexible names
-    product_col = find_col(df, ["Product", "Description", "Item", "Product Name", "description"])
-    customer_col = find_col(df, ["Customer ID", "CustomerID", "customer_id", "custid", "CID"])
-    price_col = find_col(df, ["Price", "UnitPrice", "Unit Price", "TotalPrice", "Amount", "rate"])
-    qty_col = find_col(df, ["Quantity", "Qty", "QTY", "Units", "Count"])
-    invoice_date_col = find_col(df, ["InvoiceDate", "Invoice Date", "Date", "TransactionDate", "invoice_date"])
-    invoice_col = find_col(df, ["Invoice", "InvoiceNo", "Invoice Number", "InvoiceNo."])
+    product_col = find_col(df, ["Product", "Description", "Item", "Product Name"])
+    customer_col = find_col(df, ["Customer ID", "CustomerID", "customer_id", "CID"])
+    price_col = find_col(df, ["Price", "UnitPrice", "Unit Price", "Amount", "rate"])
+    qty_col = find_col(df, ["Quantity", "Qty", "QTY", "Units"])
+    invoice_date_col = find_col(df, ["InvoiceDate", "Invoice Date", "Date", "TransactionDate"])
 
     missing = []
-    if not product_col:
-        missing.append("Product/Description")
-    if not customer_col:
-        missing.append("Customer ID")
-    if not price_col:
-        missing.append("Price")
+    if not product_col: missing.append("Product/Description")
+    if not customer_col: missing.append("Customer ID")
+    if not price_col: missing.append("Price")
     if missing:
-        st.error(f"Required column(s) missing from file: {', '.join(missing)}. Rename columns or provide a file with these columns.")
+        st.error(f"Required column(s) missing: {', '.join(missing)}")
         st.stop()
 
-    # create standardized columns
-    df['Product'] = df[product_col].astype(str)
-    df['CustomerRaw'] = df[customer_col].astype(str).str.strip()
+    df["Product"] = df[product_col].astype(str)
+    df["CustomerRaw"] = df[customer_col].astype(str).str.strip()
 
-    # Try to coerce Customer ID to integer series if possible
-    # If conversion fails, keep as string but we'll guide user to input integer if integers present.
-    cust_as_int = None
+    # ✅ Force CustomerID as integer only
     try:
-        df['CustomerID_int'] = pd.to_numeric(df['CustomerRaw'], errors='coerce').dropna().astype(int)
-        # If a large fraction can be ints, treat CustomerID as int
-        frac_int = df['CustomerRaw'].apply(lambda x: str(x).strip().replace('.0','').isdigit()).mean()
-        if frac_int > 0.5:
-            df['CustomerID'] = df['CustomerID_int']
-            cust_as_int = True
-        else:
-            df['CustomerID'] = df['CustomerRaw']
-            cust_as_int = False
-    except Exception:
-        df['CustomerID'] = df['CustomerRaw']
-        cust_as_int = False
+        df["CustomerID"] = pd.to_numeric(df["CustomerRaw"], errors='raise').astype(int)
+    except:
+        st.error("❌ Customer ID column contains non-integer values. Convert to integer in Excel and upload again.")
+        st.stop()
 
-    # Price & Quantity numeric
-    df['Price'] = pd.to_numeric(df[price_col], errors='coerce').fillna(0.0)
-    if qty_col:
-        df['Quantity'] = pd.to_numeric(df[qty_col], errors='coerce').fillna(1).astype(int)
-    else:
-        df['Quantity'] = 1
+    df["Price"] = pd.to_numeric(df[price_col], errors="coerce").fillna(0.0)
+    df["Quantity"] = pd.to_numeric(df[qty_col], errors="coerce").fillna(1).astype(int) if qty_col else 1
 
-    # InvoiceDate
     if invoice_date_col:
-        df['InvoiceDate'] = pd.to_datetime(df[invoice_date_col], errors='coerce')
+        df["InvoiceDate"] = pd.to_datetime(df[invoice_date_col], errors="coerce")
     else:
-        df['InvoiceDate'] = pd.NaT
+        df["InvoiceDate"] = pd.NaT
 
-    # TotalAmount
-    df['TotalAmount'] = (df['Price'] * df['Quantity']).round(2)
+    df["TotalAmount"] = (df["Price"] * df["Quantity"]).round(2)
 
-    st.success("✅ File loaded and columns mapped.")
-    st.subheader("Preview (first rows)")
+    st.success("✅ File loaded successfully.")
+    st.subheader("Preview")
     st.dataframe(df.head())
 
     # -------------------------
-    # 2) RFM calculation & clustering
+    # RFM Calculation
     # -------------------------
     st.header("2️⃣ RFM Calculation & Visuals")
 
-    if df['InvoiceDate'].notna().any():
-        snapshot_date = df['InvoiceDate'].max() + pd.Timedelta(days=1)
-        rfm = df.groupby('CustomerID').agg({
-            'InvoiceDate': lambda x: (snapshot_date - x.max()).days,
-            # Frequency: if invoice_col exists use nunique(invoice) else use count of rows / transactions
-            # we will use count of transactions as frequency fallback
-            'Product': 'count',
-            'TotalAmount': 'sum'
-        }).reset_index().rename(columns={'InvoiceDate': 'Recency', 'Product': 'Frequency', 'TotalAmount': 'Monetary'})
+    if df["InvoiceDate"].notna().any():
+        snapshot_date = df["InvoiceDate"].max() + pd.Timedelta(days=1)
+        rfm = df.groupby("CustomerID").agg({
+            "InvoiceDate": lambda x: (snapshot_date - x.max()).days,
+            "Product": "count",
+            "TotalAmount": "sum"
+        }).reset_index().rename(columns={
+            "InvoiceDate": "Recency",
+            "Product": "Frequency",
+            "TotalAmount": "Monetary"
+        })
     else:
-        # invoice date not present -> cannot compute recency. but still compute freq & monetary
-        rfm = df.groupby('CustomerID').agg({
-            'Product': 'count',
-            'TotalAmount': 'sum'
-        }).reset_index().rename(columns={'Product': 'Frequency', 'TotalAmount': 'Monetary'})
-        rfm['Recency'] = np.nan
+        rfm = df.groupby("CustomerID").agg({
+            "Product": "count",
+            "TotalAmount": "sum"
+        }).reset_index().rename(columns={
+            "Product": "Frequency",
+            "TotalAmount": "Monetary"
+        })
+        rfm["Recency"] = np.nan
 
-    st.write("Sample RFM table:")
-    st.dataframe(rfm.head())
-
-    # For clustering we require no-NaN; if Recency is NaN, fill with median
     rfm_for_clust = rfm.copy()
-    if rfm_for_clust['Recency'].isna().all():
-        # create a synthetic recency column (all equal) to allow clustering on Frequency & Monetary
-        rfm_for_clust['Recency'] = rfm_for_clust['Frequency'].max()  # arbitrary
-    else:
-        rfm_for_clust['Recency'] = rfm_for_clust['Recency'].fillna(rfm_for_clust['Recency'].median())
+    rfm_for_clust["Recency"] = rfm_for_clust["Recency"].fillna(rfm_for_clust["Recency"].median())
 
-    # Log transform and scale
-    rfm_for_clust['Recency_log'] = np.log1p(rfm_for_clust['Recency'].clip(lower=0))
-    rfm_for_clust['Frequency_log'] = np.log1p(rfm_for_clust['Frequency'].clip(lower=0))
-    rfm_for_clust['Monetary_log'] = np.log1p(rfm_for_clust['Monetary'].clip(lower=0))
+    rfm_for_clust["Recency_log"] = np.log1p(rfm_for_clust["Recency"])
+    rfm_for_clust["Frequency_log"] = np.log1p(rfm_for_clust["Frequency"])
+    rfm_for_clust["Monetary_log"] = np.log1p(rfm_for_clust["Monetary"])
 
-    features = rfm_for_clust[['Recency_log', 'Frequency_log', 'Monetary_log']].copy()
     scaler = StandardScaler()
-    X = scaler.fit_transform(features)
+    X = scaler.fit_transform(rfm_for_clust[["Recency_log", "Frequency_log", "Monetary_log"]])
 
-    # KMeans clustering
     kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
-    clusters = kmeans.fit_predict(X)
-    rfm_for_clust['Cluster'] = clusters
-    # map back Cluster into original rfm
-    rfm = rfm.merge(rfm_for_clust[['CustomerID', 'Cluster']], on='CustomerID', how='left')
-    rfm['Cluster'] = rfm['Cluster'].fillna(-1).astype(int)
+    rfm_for_clust["Cluster"] = kmeans.fit_predict(X)
 
-    # Cluster summary
-    cluster_summary = rfm.groupby('Cluster').agg({
-        'Recency': ['mean','median'],
-        'Frequency': ['mean','median'],
-        'Monetary': ['mean','median'],
-        'CustomerID': 'count'
-    })
-    # flatten columns
-    cluster_summary.columns = [
-        '_'.join(col).strip() for col in cluster_summary.columns.values
-    ]
-    cluster_summary = cluster_summary.rename(columns={
-        'CustomerID_count': 'Count',
-        'Recency_mean': 'Recency_mean',
-        'Frequency_mean': 'Frequency_mean',
-        'Monetary_mean': 'Monetary_mean'
-    })
-    cluster_summary = cluster_summary.reset_index()
-    st.subheader("Cluster summary (sample)")
+    rfm = rfm.merge(rfm_for_clust[["CustomerID", "Cluster"]], on="CustomerID", how="left")
+
     if show_cluster_table:
-        st.dataframe(cluster_summary)
+        st.subheader("Cluster Summary")
+        st.dataframe(rfm.groupby("Cluster").mean().round(2))
 
-    # 3D scatter
-    st.subheader("🟣 3D RFM Scatter (Recency - Frequency - Monetary)")
-    fig3d = px.scatter_3d(
-        rfm,
-        x='Recency',
-        y='Frequency',
-        z='Monetary',
-        color='Cluster',
-        hover_data=['CustomerID'],
-        title="RFM 3D Scatter"
-    )
-    st.plotly_chart(fig3d, use_container_width=True)
-
-    # Bar charts: separate for R, F, M (average per cluster)
-    st.subheader("📊 Bar charts — Average Recency / Frequency / Monetary by Cluster")
-
-    # Prepare data for bar charts
-    bar_df = rfm.groupby('Cluster').agg({'Recency':'mean','Frequency':'mean','Monetary':'mean'}).round(2).reset_index()
-    if bar_df.empty:
-        st.info("Not enough data to display bar charts.")
-    else:
-        fig_r = px.bar(bar_df, x='Cluster', y='Recency', title="Average Recency by Cluster", text='Recency')
-        st.plotly_chart(fig_r, use_container_width=True)
-
-        fig_f = px.bar(bar_df, x='Cluster', y='Frequency', title="Average Frequency by Cluster", text='Frequency')
-        st.plotly_chart(fig_f, use_container_width=True)
-
-        fig_m = px.bar(bar_df, x='Cluster', y='Monetary', title="Average Monetary by Cluster", text='Monetary')
-        st.plotly_chart(fig_m, use_container_width=True)
+    st.subheader("🟣 3D RFM Scatter")
+    fig = px.scatter_3d(rfm, x="Recency", y="Frequency", z="Monetary", color="Cluster")
+    st.plotly_chart(fig, use_container_width=True)
 
     # -------------------------
-    # 3) Customer lookup -> products -> billing
-    # flow: upload -> rfm visuals -> then enter customer id
+    # Customer Lookup & Billing
     # -------------------------
-    st.header("3️⃣ Customer Lookup → Products → Invoice (Indian Rupees)")
+    st.header("3️⃣ Customer Lookup → Billing (₹ integer only)")
 
-    st.markdown("Enter the customer's ID (integers supported). If your Customer IDs are integers, enter integer value. Otherwise enter exact ID shown in the dataset preview above.")
+    sample_ids = rfm["CustomerID"].unique()[:20].tolist()
+    st.write("Sample Customer IDs:", sample_ids)
 
-    # For user convenience show a small sample of customer IDs
-    sample_ids = rfm['CustomerID'].astype(str).unique()[:20].tolist()
-    st.write("Sample Customer IDs (first 20):", sample_ids)
-
-    cust_input = st.text_input("Customer ID (exact match)")
+    cust_input = st.text_input("Enter Customer ID (integer only)")
 
     if cust_input:
-        # try to interpret as integer if possible (user said Customer ID are integers)
-        cust_key = None
-        try:
-            cust_key_int = int(cust_input)
-            # prefer integer match if our df has integer CustomerID
-            if pd.api.types.is_integer_dtype(rfm['CustomerID']):
-                cust_key = cust_key_int
-            else:
-                # if rfm CustomerID are stored as strings, use string match
-                if str(cust_key_int) in rfm['CustomerID'].astype(str).values:
-                    cust_key = str(cust_key_int)
-                else:
-                    cust_key = cust_input.strip()
-        except Exception:
-            cust_key = cust_input.strip()
 
-        # Filter customer transactions from original df
-        # Need to compare types carefully:
-        if pd.api.types.is_integer_dtype(df['CustomerID']) or pd.api.types.is_integer_dtype(rfm['CustomerID']):
-            try:
-                cust_key_num = int(cust_key)
-                cust_tx = df[df['CustomerID'].astype(int) == cust_key_num]
-            except Exception:
-                cust_tx = df[df['CustomerID'].astype(str) == str(cust_key)]
-        else:
-            cust_tx = df[df['CustomerID'].astype(str) == str(cust_key)]
+        # ✅ Only integer accepted
+        if not cust_input.isdigit():
+            st.error("❌ Customer ID should be an INTEGER like: 101, 4502, etc.")
+            st.stop()
 
+        cust_key = int(cust_input)
+
+        cust_tx = df[df["CustomerID"] == cust_key]
 
         if cust_tx.empty:
-            st.error("Customer ID not found in the uploaded file. Check exact spelling/format (no extra spaces).")
+            st.error("Customer ID not found.")
         else:
-            st.success(f"Found {len(cust_tx)} transaction rows for customer `{cust_input}`")
+            st.success(f"Found {len(cust_tx)} rows for Customer ID {cust_key}")
 
-            # Show all purchased products (unique)
-            st.subheader("🛒 All products purchased by this customer")
-            prod_list = cust_tx[['Product','Quantity','Price','InvoiceDate']].copy()
-            # format InvoiceDate
-            if 'InvoiceDate' in prod_list.columns and prod_list['InvoiceDate'].notna().any():
-                prod_list['InvoiceDate'] = pd.to_datetime(prod_list['InvoiceDate']).dt.strftime('%Y-%m-%d')
-            st.dataframe(prod_list.reset_index(drop=True))
+            st.subheader("🛒 Purchased Products")
+            st.dataframe(cust_tx[["Product", "Quantity", "Price", "InvoiceDate"]])
 
-            # Frequency table and bought dates
-            freq_table = cust_tx.groupby('Product').agg({
-                'Quantity':'sum',
-                'InvoiceDate': lambda x: sorted(list(pd.to_datetime(x.dropna().unique())) )
-            }).reset_index().rename(columns={'Quantity':'Frequency'})
+            freq_table = cust_tx.groupby("Product").agg({
+                "Quantity": "sum",
+                "InvoiceDate": lambda x: sorted(list(pd.to_datetime(x.dropna().unique())))
+            }).reset_index().rename(columns={"Quantity": "Frequency"})
 
-            # convert bought dates to string list
-            def dates_to_list(dts):
-                if not dts:
-                    return []
-                return [pd.to_datetime(d).strftime('%Y-%m-%d') for d in dts]
-            freq_table['Bought Dates'] = freq_table['InvoiceDate'].apply(dates_to_list)
-            freq_table = freq_table.drop(columns=['InvoiceDate'])
+            freq_table["Bought Dates"] = freq_table["InvoiceDate"].apply(
+                lambda dates: [pd.to_datetime(d).strftime("%Y-%m-%d") for d in dates]
+            )
+            freq_table = freq_table.drop(columns=["InvoiceDate"])
 
-            # Offer label based on frequency and sidebar discounts
+            # ✅ Updated offer logic
             def offer_label(freq):
-                if freq >= 5:
+                if freq > 5:
                     return f"🟢 Big Discount ({big_discount}%)"
-                elif freq >= 3:
+                elif freq > 3:
                     return f"🟡 Medium Discount ({medium_discount}%)"
-                elif freq == 2:
+                elif freq > 2:
                     return f"🟠 Small Discount ({small_discount}%)"
                 else:
                     return "🔴 No Offer (Watch)"
 
-            freq_table['Offer'] = freq_table['Frequency'].apply(offer_label)
+            freq_table["Offer"] = freq_table["Frequency"].apply(offer_label)
 
-            # Build invoice rows (integer rupees)
             invoice_rows = []
             for _, r in freq_table.iterrows():
-                prod = r['Product']
-                qty = int(r['Frequency'])
-                # unit price: take first matching unit price from customer's transactions
-                unit_vals = cust_tx[cust_tx['Product']==prod]['Price'].dropna().values
-                unit_price = float(unit_vals[0]) if len(unit_vals)>0 else 0.0
-                unit_int = int(round(unit_price))  # show unit price as integer rupee
-                final_price = int(round(unit_price * qty))  # total before discount in rupees
-                label = r['Offer']
-                if 'Big' in label:
-                    pct = int(big_discount)
-                elif 'Medium' in label:
-                    pct = int(medium_discount)
-                elif 'Small' in label:
-                    pct = int(small_discount)
-                else:
-                    pct = 0
-                discount_amt = int((final_price * pct) / 100)  # integer rupees
-                after_discount = final_price - discount_amt
+                prod = r["Product"]
+                qty = int(r["Frequency"])
+
+                price_val = cust_tx[cust_tx["Product"] == prod]["Price"].values[0]
+                unit_price = int(round(price_val))
+                final_price = int(round(price_val * qty))
+
+                label = r["Offer"]
+                pct = int(label.split("(")[1].replace("%)", "").replace("%", "")) if "%" in label else 0
+
+                discount = int((final_price * pct) / 100)
+                after_discount = final_price - discount
+
                 invoice_rows.append({
-                    'Product': prod,
-                    'Quantity': qty,
-                    'UnitPrice(₹)': unit_int,
-                    'FinalPrice(₹)': final_price,
-                    'Offer': label,
-                    'DiscountAmount(₹)': discount_amt,
-                    'AfterDiscount(₹)': after_discount,
-                    'Bought Dates': r['Bought Dates']
+                    "Product": prod,
+                    "Quantity": qty,
+                    "UnitPrice(₹)": unit_price,
+                    "FinalPrice(₹)": final_price,
+                    "Offer": label,
+                    "DiscountAmount(₹)": discount,
+                    "AfterDiscount(₹)": after_discount,
+                    "Bought Dates": r["Bought Dates"]
                 })
 
             invoice_df = pd.DataFrame(invoice_rows)
 
-            st.subheader("📦 Product Frequency, Bought Dates, Offers & Billing (₹ integer only)")
-            display_df = invoice_df[['Product','Quantity','Bought Dates','Offer','UnitPrice(₹)','FinalPrice(₹)','DiscountAmount(₹)','AfterDiscount(₹)']]
-            st.dataframe(display_df)
+            st.subheader("💰 Invoice (₹ integer only)")
+            st.dataframe(invoice_df)
 
-            # Totals
-            subtotal = int(invoice_df['FinalPrice(₹)'].sum())
-            total_discount = int(invoice_df['DiscountAmount(₹)'].sum())
-            grand_total = int(invoice_df['AfterDiscount(₹)'].sum())
+            subtotal = invoice_df["FinalPrice(₹)"].sum()
+            total_discount = invoice_df["DiscountAmount(₹)"].sum()
+            grand_total = invoice_df["AfterDiscount(₹)"].sum()
 
-            st.markdown("---")
-            st.write(f"**Subtotal (₹):** {subtotal}")
-            st.write(f"**Total Discount (₹):** {total_discount}")
-            st.write(f"**Grand Total (₹):** {grand_total}")
+            st.write(f"**Subtotal:** ₹ {subtotal}")
+            st.write(f"**Total Discount:** ₹ {total_discount}")
+            st.write(f"**Final Bill:** ₹ {grand_total}")
 
-            # Download invoice as CSV
-            csv_bytes = invoice_df.to_csv(index=False).encode('utf-8')
-            st.download_button("⬇️ Download Invoice (CSV)", data=csv_bytes, file_name=f"invoice_{cust_input}.csv", mime='text/csv')
+            csv_bytes = invoice_df.to_csv(index=False).encode("utf-8")
+            st.download_button("⬇️ Download Invoice CSV", data=csv_bytes, file_name=f"invoice_{cust_key}.csv")
 
 else:
-    st.info("Upload a file to start. Required data: Customer ID, Product/Description, Price, Quantity (or Qty), InvoiceDate (optional).")
-    st.stop()
+    st.info("Upload a file to get started!")
