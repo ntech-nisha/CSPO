@@ -84,11 +84,14 @@ if uploaded_file:
     df["CustomerRaw"] = df[customer_col].astype(str).str.strip()
 
     # ✅ Force Customer ID as integer only
-    try:
-        df["CustomerID"] = pd.to_numeric(df["CustomerRaw"], errors='raise').astype(int)
-    except:
-        st.error("❌ Customer ID should contain only numbers, convert in excel and upload.")
-        st.stop()
+   # ✅ Clean Customer ID and convert safely
+df["CustomerID"] = (
+    df["CustomerRaw"]
+    .str.replace(" ", "")        # remove spaces
+    .str.replace(",", "")        # remove commas
+    .astype(float)               # handles values like 13155.0 / scientific notation
+    .astype(int)                 # force integer ID
+)
 
     df["Price"] = pd.to_numeric(df[price_col], errors="coerce").fillna(0)
 
