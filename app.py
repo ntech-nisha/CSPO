@@ -134,49 +134,135 @@ if uploaded_file:
     col2.plotly_chart(px.bar(rfm.groupby("Cluster")["Frequency"].mean(), title="Avg Frequency"))
     col3.plotly_chart(px.bar(rfm.groupby("Cluster")["Monetary"].mean(), title="Avg Monetary"))
 
+# ===========================================
+# CUSTOMER RFM + BILLING DASHBOARD (INDIA)
+# ===========================================
+import streamlit as st
+import pandas as pd
+import numpy as np
+from sklearn.preprocessing import StandardScaler
+from sklearn.cluster import KMeans
+import plotly.express as px
 
-    # -----------------------------------
-    # 3) BILLING SECTION (Single Customer)
-    # -----------------------------------
-    st.header("3️⃣ Billing — Single Customer Invoice")
+st.set_page_config(page_title="Customer RFM + Billing (India)", layout="wide")
+st.title("🛍️ Customer RFM + Indian Billing Dashboard")
 
-    cust_id = st.text_input("Enter Customer ID (Exact Match)")
+# -------------------------
+# Helper Function
+# -------------------------
+def find_column(df, possible_names):
+    for col in df.columns:
+        if col.lower() in [name.lower() for name in possible_names]:
+            return col
+    return None
 
-    if cust_id:
-        product_name = st.text_input("Enter Product Name")
-        price = st.number_input("Enter Unit Price (₹)", min_value=0, value=0)
-        freq = st.number_input("Enter Frequency", min_value=1, value=1, step=1)
+# -------------------------
+# Upload section
+# -------------------------
+uploaded_file = st.file_uploader("Upload Sales Dataset (CSV / Excel)", type=["csv", "xlsx"])
 
-        if st.button("➕ Add to Invoice"):
-            if freq >= 5:
-                offer = f"BIG Discount ({big_discount}%)"
-                discount_amount = int(price * freq * big_discount / 100)
-            elif freq >= 3:
-                offer = f"MEDIUM Discount ({medium_discount}%)"
-                discount_amount = int(price * freq * medium_discount / 100)
-            elif freq >= 2:
-                offer = f"SMALL Discount ({small_discount}%)"
-                discount_amount = int(price * freq * small_discount / 100)
-            else:
-                offer = "NO Discount"
-                discount_amount = 0
+if uploaded_file:
+    df = pd.read_csv(uploaded_file) if uploaded_file.name.endswith(".csv") else pd.read_excel(uploaded_file)
 
-            final = (price * freq) - discount_amount
+    st.success("✅ File Uploaded Successfully!")
+    st.write("### Preview of dataset:")
+    st.dataframe(df.head())
 
-            # ✅ FIX: Store inside session_state
-            st.session_state.invoice_items.append(
-                [product_name, freq, offer, price, discount_amount, final]
-            )
+    # Required fields auto-detect
+    invoice_col = find_column(df, ["InvoiceNo", "Invoice Number", "BillNo", "Invoice"])
+    date_col = find_column(df, ["InvoiceDate", "Date"])
+    customer_col = find_column(df, ["CustomerID", "Customer Id", "ClientID"])
+    amount_col = find_column(df, ["Amount", "TotalAmount", "BillAmount", "Price", "Total"])
 
-        if st.session_state.invoice_items:
-            invoice_df = pd.DataFrame(
-                st.session_state.invoice_items,
-                columns=["Product", "Frequency", "Offer Type", "Unit Price (₹)", "Discount (₹)", "Final Price (₹)"]
-            )
-            st.table(invoice_df)
+    if not all([invoice_col, date_col, customer_col, amount_col]):
+        st.error("❌ Required columns missing! Make sure dataset includes:\nInvoice No, Date, Customer ID, Amount")
+        st.stop()
 
-            if st.button("💰 Calculate FINAL TOTAL"):
-                st.success(f"✅ Grand Total (₹): {invoice_df['Final Price (₹)'].sum()}")
+    df = df[[invoice_col, date_col, customer_col, amount_col]].copy()
+    df.columns = ["InvoiceNo", "InvoiceDate", "CustomerID", "Amount"]
+
+    df["InvoiceDate"] = pd.to_datetime(df["InvoiceDate"])
+
+    # ----------------------------
+    # ✅ RFM Calculation
+    # ----------------------------
+    snapshot_date = df["InvoiceDate"].max() + pd.Timedelta(days=1)
+
+    rfm = df.groupby("CustomerID").agg({
+        "InvoiceDate": lambda x: (snapshot_date - x.max()).days,
+        "InvoiceNo": "count",
+        "Amount": "sum"
+    }).reset_index()
+
+    rfm.columns = ["CustomerID", "Recency", "Frequency", "Monetary"]
+
+    # 🔥 Fix: Log transform safely
+    rfm["R_log"] = np.log1p(rfm["Recency"])
+    rfm["F_log"] = np.log1p(rfm["Frequency"])
+    rfm["M_log"] = np.log1p(rfm["Monetary"])
+
+    # 🔥 Drop rows with NaN before clustering
+    rfm.dropna(inplace=True)
+
+    # Normalize
+    X = rfm[["R_log", "F_log", "M_log"]]
+    scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(X)
+
+    # ----------------------------
+    # ✅ K-Means Clustering
+    # ----------------------------
+    n_clusters = st.slider("Select number of clusters", 2, 10, 4)
+
+    kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
+    rfm["Cluster"] = kmeans.fit_predict(X_scaled)
+
+    # ----------------------------
+    # ✅ 3D Visualization
+    # ----------------------------
+    fig = px.scatter_3d(
+        rfm,
+        x="R_log",
+        y="F_log",
+        z="M_log",
+        color="Cluster",
+        title="Customer Segmentation (3D RFM Clusters)",
+        opacity=0.8
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
+
+    # ----------------------------
+    # ✅ RFM Output Table
+    # ----------------------------
+    st.write("### Segmented Customer Data (RFM)")
+    st.dataframe(rfm)
+
+    # ----------------------------
+    # ✅ BILLING SECTION (Integer Discount)
+    # ----------------------------
+    st.subheader("💵 Billing System (India — Discount will be Round Off to ₹)")
+
+    p_name = st.text_input("Product Name:")
+    price = st.number_input("Product Price (₹)", min_value=1)
+    quantity = st.number_input("Quantity", min_value=1, step=1)
+    discount = st.number_input("Discount % (Only Integer)", min_value=0, max_value=100, step=1)
+
+    if st.button("Generate Bill"):
+        total = price * quantity
+        discount_amount = round((total * discount) / 100)  # only integer rupees
+        final_amount = total - discount_amount
+
+        st.success(f"""
+        ✅ Bill Generated!
+
+        **Product:** {p_name}  
+        **MRP:** ₹{total}  
+        **Discount ({discount}%):** ₹{discount_amount}  
+        **Final Amount to Pay:** ✅ ₹{final_amount}
+        """)
 
 else:
-    st.info("⬆️ Upload a sales file to continue.")
+    st.info("📂 Upload dataset to begin")
+
+
