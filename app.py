@@ -100,12 +100,11 @@ if uploaded:
     st.plotly_chart(fig2, use_container_width=True)
 
     st.success("✅ RFM clustering & visualization completed.")
-
 # ==========================================================================================
-# ✅ CUSTOMER ID DISCOUNT SCREEN (PERCENTAGE → RUPEES CONVERSION)  — FIXED VERSION
+# ✅ CUSTOMER DISCOUNT – PRODUCT LEVEL EDITABLE DISCOUNT (₹ / % Both)
 # ==========================================================================================
 
-st.subheader("💳 Customer Discount Based on Frequency & Offer Type")
+st.subheader("💳 Apply Discount Per Product (Editable %)")
 
 customer_id_input = st.text_input("🔍 Enter Customer ID to view purchase & offer details")
 
@@ -122,7 +121,6 @@ if customer_id_input:
         st.warning("⚠️ No records found for this Customer ID")
         st.stop()
 
-    # ✅ Calculate product-wise frequency
     cust_grouped = (
         cust_df.groupby("Product")
         .agg({
@@ -132,7 +130,7 @@ if customer_id_input:
         })
     ).rename(columns={"Product": "Frequency"}).reset_index()
 
-    # ✅ Offer type based on frequency of that product
+    # Offer logic
     def offer_type(freq):
         if freq >= 5:
             return "Big Discount"
@@ -143,23 +141,41 @@ if customer_id_input:
 
     cust_grouped["Offer Type"] = cust_grouped["Frequency"].apply(offer_type)
 
-    st.write("### 🧾 Customer Purchase Details (Product wise frequency)")
+    st.write("### 🧾 Product-wise Purchase Summary")
     st.dataframe(cust_grouped)
 
-    # ✅ User entering discount percentage (editable)
-    discount_percent = st.number_input(
-        "✏️ Enter Discount Percentage (%)",
-        min_value=0, max_value=100, step=1
-    )
+    st.write("### ✏️ Apply Discount per Product")
 
-    total_amount = cust_grouped["Amount"].sum()
+    final_bill = []
+    total_final = 0
 
-    discount_rupees = (total_amount * discount_percent) / 100
-    final_amount = total_amount - discount_rupees
+    for i, row in cust_grouped.iterrows():
+        st.markdown(f"#### 🛒 {row['Product']} ({row['Offer Type']})")
 
-    st.write(f"### 💰 Total Amount            : ₹ {total_amount:,.2f}")
-    st.write(f"### 🏷 Discount ({discount_percent}%) : ₹ {discount_rupees:,.2f}")
-    st.write(f"### ✅ Final Payable Amount      : ₹ {final_amount:,.2f}")
+        discount_percent = st.number_input(
+            f"Enter Discount % for {row['Product']}",
+            min_value=0, max_value=100, step=1, key=f"disc_{i}"
+        )
+
+        discount_rupees = (row["Amount"] * discount_percent) / 100
+        payable_amount = row["Amount"] - discount_rupees
+
+        final_bill.append([row["Product"], row["Amount"], discount_percent, discount_rupees, payable_amount])
+
+        total_final += payable_amount
+
+        st.write(f"➡️ Discount ₹: **{discount_rupees:,.2f}**")
+        st.write(f"➡️ Final Amount ₹: **{payable_amount:,.2f}**")
+        st.markdown("---")
+
+    # Final Summary Table
+    final_df = pd.DataFrame(final_bill, columns=["Product", "Original Amount", "Discount %", "Discount (₹)", "Final Amount"])
+
+    st.write("### ✅ Final Billing Summary")
+    st.dataframe(final_df)
+
+    st.markdown(f"## 🟢 Total Payable after Discount: ₹ **{total_final:,.2f}**")
+
 
 
     
