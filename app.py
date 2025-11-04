@@ -22,6 +22,7 @@ import plotly.express as px
 st.set_page_config(page_title="Customer RFM + Billing (India)", layout="wide")
 st.title("🛍️ Customer RFM + Indian Billing Dashboard")
 
+
 # -----------------------------------------------------------
 # Helper - Find matching column from uploaded file
 # -----------------------------------------------------------
@@ -37,7 +38,7 @@ def find_col(df, candidates):
 
 
 # -----------------------------------------------------------
-# SIDEBAR SETTINGS (user can edit discounts)
+# Sidebar Discount Settings
 # -----------------------------------------------------------
 st.sidebar.header("⚙️ Offer Discount Setup (Product-level)")
 big_discount = st.sidebar.number_input("Big Discount % (freq >= 5)", min_value=0, max_value=100, value=20, step=1)
@@ -49,7 +50,7 @@ show_cluster_table = st.sidebar.checkbox("Show Cluster Summary Table", value=Fal
 
 
 # -----------------------------------------------------------
-# 1️⃣ FILE UPLOAD
+# 1️⃣ FILE UPLOAD SECTION
 # -----------------------------------------------------------
 st.header("1️⃣ Upload sales/transactions file (CSV or Excel)")
 uploaded_file = st.file_uploader("Upload CSV / Excel file", type=["csv", "xlsx"])
@@ -63,7 +64,7 @@ if uploaded_file:
 
     df.columns = [c.strip() for c in df.columns]
 
-    # auto column mapping
+    # Auto column mapping
     product_col = find_col(df, ["Product", "Description", "Item", "Product Name"])
     customer_col = find_col(df, ["Customer ID", "CustomerID", "customer_id", "CID"])
     price_col = find_col(df, ["Price", "UnitPrice", "Unit Price", "Amount", "rate"])
@@ -79,19 +80,18 @@ if uploaded_file:
         st.error(f"Required column(s) missing: {', '.join(missing)}")
         st.stop()
 
-    # formatting and conversion
+    # ✅ Clean Format
     df["Product"] = df[product_col].astype(str)
     df["CustomerRaw"] = df[customer_col].astype(str).str.strip()
 
-    # ✅ Force Customer ID as integer only
-   # ✅ Clean Customer ID and convert safely
-df["CustomerID"] = (
-    df["CustomerRaw"]
-    .str.replace(" ", "")        # remove spaces
-    .str.replace(",", "")        # remove commas
-    .astype(float)               # handles values like 13155.0 / scientific notation
-    .astype(int)                 # force integer ID
-)
+    # ✅ Clean Customer ID and convert to INTEGER (no float or scientific)
+    df["CustomerID"] = (
+        df["CustomerRaw"]
+        .str.replace(" ", "")
+        .str.replace(",", "")
+        .astype(float)          # handle 13155.0 and scientific notation
+        .astype(int)            # final integer
+    )
 
     df["Price"] = pd.to_numeric(df[price_col], errors="coerce").fillna(0)
 
@@ -112,9 +112,9 @@ df["CustomerID"] = (
 
 
     # -----------------------------------------------------------
-    # 2️⃣ RFM Calculation + K-Means Clustering
+    # 2️⃣ RFM Calculation + Clustering
     # -----------------------------------------------------------
-    st.header("2️⃣ RFM Score + KMeans Clustering")
+    st.header("2️⃣ RFM Scoring + KMeans Clustering")
 
     snapshot_date = df["InvoiceDate"].max() + pd.Timedelta(days=1)
 
@@ -128,7 +128,6 @@ df["CustomerID"] = (
         "TotalAmount": "Monetary"
     })
 
-    # -------- K-Means -------
     rfm_copy = rfm.copy()
     rfm_copy["Recency"].fillna(rfm_copy["Recency"].median(), inplace=True)
 
@@ -145,19 +144,17 @@ df["CustomerID"] = (
     rfm = rfm.merge(rfm_copy[["CustomerID", "Cluster"]], on="CustomerID")
 
     if show_cluster_table:
-        st.subheader("Cluster Summary")
+        st.subheader("Cluster Summary Table")
         st.dataframe(rfm.groupby("Cluster").mean().round(2))
 
-
-    # 3D visualization
     fig = px.scatter_3d(rfm, x="Recency", y="Frequency", z="Monetary", color="Cluster")
     st.plotly_chart(fig, use_container_width=True)
 
 
     # -----------------------------------------------------------
-    # 3️⃣ CUSTOMER LOOKUP + PRODUCT LEVEL BILLING
+    # 3️⃣ BILLING - PRODUCT LEVEL DISCOUNT
     # -----------------------------------------------------------
-    st.header("3️⃣ Customer Billing (Product-level Discount Calculation)")
+    st.header("3️⃣ Customer Billing with Product-Level Discount")
 
     customer_id_input = st.text_input("Enter Customer ID")
 
@@ -176,7 +173,6 @@ df["CustomerID"] = (
 
         st.success(f"✅ Records found for Customer ID: {cust_id}")
 
-        # product frequency
         selected_products = cust_tx.groupby("Product").agg({"Quantity": "sum", "Price": "first"}).reset_index()
 
         bill_items = []
@@ -186,20 +182,15 @@ df["CustomerID"] = (
             qty = row["Quantity"]
             price = row["Price"]
 
-            # find how many times this customer bought same product
-            past_purchases = int(qty)
-
-            # OFFER LOGIC (from your first program)
-            if past_purchases >= 5:
+            if qty >= 5:
                 discount_percent = big_discount
-            elif past_purchases >= 3:
+            elif qty >= 3:
                 discount_percent = medium_discount
-            elif past_purchases >= 2:
+            elif qty >= 2:
                 discount_percent = small_discount
             else:
                 discount_percent = 0
 
-            # ✅ integer only discount
             discount_amount = int((price * discount_percent) / 100)
             final_price = (price - discount_amount) * qty
 
@@ -208,11 +199,12 @@ df["CustomerID"] = (
         bill_df = pd.DataFrame(bill_items,
                                columns=["Product", "Qty", "Price (₹)", "Discount %", "Discount Amount (₹)", "Final Price (₹)"])
 
-        st.subheader("🧾 Final Invoice (₹ - Integer only)")
+        st.subheader("🧾 Final Invoice (₹ Only)")
         st.table(bill_df)
 
         grand_total = bill_df["Final Price (₹)"].sum()
         st.success(f"💰 Final Amount: ₹ {grand_total}")
+
 
 else:
     st.info("Upload a sales file to continue.")
