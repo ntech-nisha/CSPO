@@ -101,29 +101,43 @@ if uploaded:
 
     st.success("✅ RFM clustering & visualization completed.")
 
-    # ------------------------------------------------------------------------------------------------
-    #  ✅ PRODUCT LEVEL DISCOUNT (EDITABLE)
-    # ------------------------------------------------------------------------------------------------
-    st.subheader("🏷 Product Based Discount (Editable for Each Product Row)")
+   # ==========================================================================================
+#  ✅ CUSTOMER ID DISCOUNT SCREEN (PERCENTAGE → RUPEES CONVERSION)
+# ==========================================================================================
 
-    unique_products = df["Product"].unique()
-    discount_df = pd.DataFrame({
-        "Product": unique_products,
-        "Discount(₹)": [0] * len(unique_products)  # default rupee-based discount
-    })
+st.subheader("💳 Customer Discount Based on Frequency & Offer Type")
 
-    updated_discount_df = st.data_editor(discount_df, num_rows="dynamic")
+customer_id_input = st.text_input("🔍 Enter Customer ID to view purchase & offer details")
 
-    # Merge entered discount into billing dataframe
-    df = df.merge(updated_discount_df, on="Product", how="left")
+if customer_id_input:
+    try:
+        customer_id_input = int(customer_id_input)
+    except:
+        st.error("❌ CustomerID must be a number")
+        st.stop()
 
-    df["FinalAmount"] = df["Amount"] - df["Discount(₹)"]
-    df["FinalAmount"] = df["FinalAmount"].apply(lambda x: max(x, 0))  # avoid negative billing
+    cust_df = df[df["CustomerID"] == customer_id_input]
 
-    st.write("### 🧾 Final Billing (After Discount)")
-    st.dataframe(df[["CustomerID", "Product", "Amount", "Discount(₹)", "FinalAmount"]])
+    if cust_df.empty:
+        st.warning("⚠️ No records found for this Customer ID")
+        st.stop()
 
-    st.subheader(f"💰 Final Bill Total: ₹{df['FinalAmount'].sum()}")
+    # Calculate frequency
+    freq = len(cust_df)
 
-else:
-    st.info("📌 Please upload Excel file to continue.")
+    # Offer Type Rules
+    if freq >= 5:
+        offer_type = "Big Discount"
+    elif freq >= 3:
+        offer_type = "Medium Discount"
+    else:
+        offer_type = "Small Discount"
+
+    cust_df_display = cust_df[["Product", "Amount", "InvoiceDate"]]
+    cust_df_display["Frequency"] = freq
+    cust_df_display["Offer Type"] = offer_type
+
+    st.write("### 🧾 Customer Purchase Details")
+    st.dataframe(cust_df_display)
+
+    
