@@ -44,7 +44,13 @@ medium_discount = st.sidebar.number_input("MEDIUM Discount % (Frequency ≥ 3)",
 small_discount = st.sidebar.number_input("SMALL Discount % (Frequency ≥ 2)", min_value=0, max_value=100, value=5)
 
 n_clusters = st.sidebar.slider("KMeans Clusters (K)", min_value=2, max_value=8, value=4)
-show_cluster_table = st.sidebar.checkbox("Show Cluster Summary", value=False)
+
+
+# --------------------------------------------------------------
+# SESSION STATE FOR BILLING (Important fix)
+# --------------------------------------------------------------
+if "invoice_items" not in st.session_state:
+    st.session_state.invoice_items = []
 
 
 # -----------------------------------
@@ -90,72 +96,56 @@ if uploaded_file:
     st.success("✅ File loaded and mapped")
     st.dataframe(df.head())
 
+
     # -----------------------------------
     # 2) RFM CALCULATION & CLUSTERING
     # -----------------------------------
     st.header("2️⃣ RFM Segmentation + Cluster Visualization")
 
-    if df["InvoiceDate"].notna().any():
-        snapshot_date = df["InvoiceDate"].max() + pd.Timedelta(days=1)
-        rfm = df.groupby("CustomerID").agg({
-            "InvoiceDate": lambda x: (snapshot_date - x.max()).days,
-            "Product": "count",
-            "TotalAmount": "sum"
-        }).reset_index().rename(columns={"InvoiceDate": "Recency", "Product": "Frequency", "TotalAmount": "Monetary"})
-    else:
-        rfm = df.groupby("CustomerID").agg({"Product": "count", "TotalAmount": "sum"}).reset_index()
-        rfm["Recency"] = np.nan
-        rfm.rename(columns={"Product": "Frequency", "TotalAmount": "Monetary"}, inplace=True)
+    snapshot_date = df["InvoiceDate"].max() + pd.Timedelta(days=1)
 
-    # log scale + standardization
+    rfm = df.groupby("CustomerID").agg(
+        Recency=("InvoiceDate", lambda x: (snapshot_date - x.max()).days),
+        Frequency=("Product", "count"),
+        Monetary=("TotalAmount", "sum")
+    ).reset_index()
+
+    # ✅ FIX NaN / infinite for clustering
+    rfm = rfm.dropna(subset=["Recency", "Frequency", "Monetary"])
+    rfm = rfm.replace([np.inf, -np.inf], 0)
+
     rfm_clust = rfm.copy()
-    rfm_clust["Recency"].fillna(rfm_clust["Recency"].median(), inplace=True)
     rfm_clust[["R_log", "F_log", "M_log"]] = np.log1p(rfm_clust[["Recency", "Frequency", "Monetary"]])
 
     X = StandardScaler().fit_transform(rfm_clust[["R_log", "F_log", "M_log"]])
     rfm["Cluster"] = KMeans(n_clusters=n_clusters, random_state=42, n_init=10).fit_predict(X)
 
-    if show_cluster_table:
-        st.dataframe(rfm.groupby("Cluster")[["Recency", "Frequency", "Monetary"]].mean().round(2))
-
-    # --- 3D PLOT ---
+    # 3D Visual
     fig3d = px.scatter_3d(
         rfm, x="Recency", y="Frequency", z="Monetary",
-        color="Cluster", hover_data=["CustomerID"], title="3D Cluster View (Recency vs Frequency vs Monetary)"
+        color="Cluster", hover_data=["CustomerID"], title="3D Cluster View (RFM Clusters)"
     )
     st.plotly_chart(fig3d, use_container_width=True)
 
-    # --- Individual Bar Graphs R / F / M ---
+
+    # --- Bar Graphs ---
     col1, col2, col3 = st.columns(3)
-
-    with col1:
-        st.subheader("Recency by Cluster")
-        st.plotly_chart(px.bar(rfm.groupby("Cluster")["Recency"].mean(), title="Avg Recency"))
-
-    with col2:
-        st.subheader("Frequency by Cluster")
-        st.plotly_chart(px.bar(rfm.groupby("Cluster")["Frequency"].mean(), title="Avg Frequency"))
-
-    with col3:
-        st.subheader("Monetary by Cluster")
-        st.plotly_chart(px.bar(rfm.groupby("Cluster")["Monetary"].mean(), title="Avg Monetary"))
+    col1.plotly_chart(px.bar(rfm.groupby("Cluster")["Recency"].mean(), title="Avg Recency"))
+    col2.plotly_chart(px.bar(rfm.groupby("Cluster")["Frequency"].mean(), title="Avg Frequency"))
+    col3.plotly_chart(px.bar(rfm.groupby("Cluster")["Monetary"].mean(), title="Avg Monetary"))
 
 
     # -----------------------------------
-    # 3) BILLING SECTION
+    # 3) BILLING SECTION (Single Customer)
     # -----------------------------------
     st.header("3️⃣ Billing — Single Customer Invoice")
 
     cust_id = st.text_input("Enter Customer ID (Exact Match)")
 
-    invoice_items = []
-
     if cust_id:
-        st.subheader(f"Customer: {cust_id}")
-
         product_name = st.text_input("Enter Product Name")
         price = st.number_input("Enter Unit Price (₹)", min_value=0, value=0)
-        freq = st.number_input("Enter Frequency (How many times purchased)", min_value=0, value=1, step=1)
+        freq = st.number_input("Enter Frequency", min_value=1, value=1, step=1)
 
         if st.button("➕ Add to Invoice"):
             if freq >= 5:
@@ -173,16 +163,20 @@ if uploaded_file:
 
             final = (price * freq) - discount_amount
 
-            invoice_items.append([product_name, freq, offer, price, discount_amount, final])
+            # ✅ FIX: Store inside session_state
+            st.session_state.invoice_items.append(
+                [product_name, freq, offer, price, discount_amount, final]
+            )
 
-        if invoice_items:
-            invoice_df = pd.DataFrame(invoice_items,
-                columns=["Product", "Frequency", "Offer Type", "Unit Price (₹)", "Discount (₹)", "Final Price (₹)"])
+        if st.session_state.invoice_items:
+            invoice_df = pd.DataFrame(
+                st.session_state.invoice_items,
+                columns=["Product", "Frequency", "Offer Type", "Unit Price (₹)", "Discount (₹)", "Final Price (₹)"]
+            )
             st.table(invoice_df)
 
             if st.button("💰 Calculate FINAL TOTAL"):
                 st.success(f"✅ Grand Total (₹): {invoice_df['Final Price (₹)'].sum()}")
-
 
 else:
     st.info("⬆️ Upload a sales file to continue.")
