@@ -48,26 +48,32 @@ for key in st.session_state.offer_dict.keys():
         value=st.session_state.offer_dict[key]
     )
 
+# -------------------------
+# UPLOAD DATA
+# -------------------------
+uploaded = st.file_uploader("Upload CSV/Excel File", type=["csv", "xlsx"])
 
-# -----------------------------------------------------------
-# File Upload
-# -----------------------------------------------------------
-uploaded_file = st.file_uploader("📤 Upload your CSV customer dataset", type=["csv"])
-if uploaded_file is None:
-    st.info("➡ Please upload dataset to continue...")
-    st.stop()
+if uploaded:
+    df = pd.read_csv(uploaded) if uploaded.name.endswith(".csv") else pd.read_excel(uploaded)
 
+    st.success("✅ File uploaded")
+    st.dataframe(df.head())
 
-df = pd.read_csv(uploaded_file)
+    # Auto detect important fields
+    invoice_col = find_col(df, ["InvoiceNo", "Invoice Number"])
+    date_col = find_col(df, ["InvoiceDate", "Date"])
+    customer_col = find_col(df, ["CustomerID", "Customer Id"])
+    product_col = find_col(df, ["Description", "Product", "Item"])
+    amount_col = find_col(df, ["Amount", "Price", "TotalAmount"])
 
-required_cols = ["CustomerID", "InvoiceNo", "InvoiceDate", "Quantity", "UnitPrice", "Description"]
-for col in required_cols:
-    if col not in df.columns:
-        st.error(f"❌ Missing column: {col}")
+    if not all([invoice_col, date_col, customer_col, product_col, amount_col]):
+        st.error("❌ Required columns not found!")
         st.stop()
 
-df["InvoiceDate"] = pd.to_datetime(df["InvoiceDate"])
-df["TotalAmount"] = df["Quantity"] * df["UnitPrice"]
+    # Clean dataframe
+    df = df[[invoice_col, date_col, customer_col, product_col, amount_col]].copy()
+    df.columns = ["InvoiceNo", "InvoiceDate", "CustomerID", "Product", "Amount"]
+    df["InvoiceDate"] = pd.to_datetime(df["InvoiceDate"])
 
 
 # -----------------------------------------------------------
