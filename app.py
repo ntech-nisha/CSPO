@@ -129,70 +129,69 @@ with col3:
     st.write("🟧 Monetary (Higher = Better)")
     fig_m = px.bar(rfm, x="Cluster", y="Monetary", color="Cluster", title="Monetary by Cluster (₹)")
     st.plotly_chart(fig_m, use_container_width=True)
+# --------------------------------------------------------------
+# ✅ Customer Billing Section
+# --------------------------------------------------------------
+st.subheader("🧾 Customer Billing")
 
-    # --------------------------------------------------------------
-    # ✅ Customer Billing Section
-    # --------------------------------------------------------------
-    st.subheader("🧾 Customer Billing")
+customer_id_input = st.number_input("🔍 Enter Customer ID to view billing", min_value=0, step=1)
 
-    customer_id_input = st.number_input("🔍 Enter Customer ID to view billing", min_value=0, step=1)
+if customer_id_input:
+    cust_df = df[df["CustomerID"] == customer_id_input]
 
-    if customer_id_input:
-        cust_df = df[df["CustomerID"] == customer_id_input]
-
-        billing = (
-            cust_df.groupby("Product")
-            .agg(
-                Frequency=("Invoice", "nunique"),
-                Qty=("Quantity", "sum"),
-                Amount=("Amount", "sum"),
-                BoughtDates=("InvoiceDate", lambda x: ", ".join(pd.to_datetime(x).dt.strftime("%d-%m-%Y").unique()))
-            )
-            .reset_index()
+    billing = (
+        cust_df.groupby("Product")
+        .agg(
+            Frequency=("Invoice", "nunique"),
+            Qty=("Quantity", "sum"),
+            Amount=("Amount", "sum"),
+            BoughtDates=("InvoiceDate", lambda x: ", ".join(pd.to_datetime(x).dt.strftime("%d-%m-%Y").unique()))
         )
+        .reset_index()
+    )
 
-        # Offer Type Logic
-        def get_offer(freq):
-            if freq >= 5:
-                return "Big Discount"
-            elif freq >= 3:
-                return "Medium Discount"
-            elif freq >= 2:
-                return "Small Discount"
-            return "No Discount"
+    # Offer Type Logic
+    def get_offer(freq):
+        if freq >= 5:
+            return "Big Discount"
+        elif freq >= 3:
+            return "Medium Discount"
+        elif freq >= 2:
+            return "Small Discount"
+        return "No Discount"
 
-        billing["OfferType"] = billing["Frequency"].apply(get_offer)
+    billing["OfferType"] = billing["Frequency"].apply(get_offer)
 
-        billing["Discount%"] = billing["OfferType"].map({
-            "Big Discount": big_discount,
-            "Medium Discount": medium_discount,
-            "Small Discount": small_discount,
-            "No Discount": 0
-        })
+    billing["Discount%"] = billing["OfferType"].map({
+        "Big Discount": big_discount,
+        "Medium Discount": medium_discount,
+        "Small Discount": small_discount,
+        "No Discount": 0
+    })
 
-        billing["Discount_Rs"] = (billing["Amount"] * billing["Discount%"] / 100).astype(int)
-        billing["FinalAmount"] = billing["Amount"] - billing["Discount_Rs"]
+    billing["Discount_Rs"] = (billing["Amount"] * billing["Discount%"] / 100).astype(int)
+    billing["FinalAmount"] = billing["Amount"] - billing["Discount_Rs"]
 
-      st.subheader("📄 Product-wise Billing Table")
-st.dataframe(
-    billing[["Product", "Frequency", "BoughtDates", "Qty", "Amount", "OfferType", "Discount_Rs", "FinalAmount"]],
-    use_container_width=True
-)
+    # ✅ Product table
+    st.subheader("📄 Product-wise Billing Table")
+    st.dataframe(
+        billing[["Product", "Frequency", "BoughtDates", "Qty", "Amount", "OfferType", "Discount_Rs", "FinalAmount"]],
+        use_container_width=True
+    )
 
-# ------------------ NEW CODE ADDED HERE ------------------
+    # ✅ Discount message + list of offer products
+    discount_products = billing[billing["OfferType"] != "No Discount"]
 
-discount_products = billing[billing["OfferType"] != "No Discount"]
+    if not discount_products.empty:
+        st.success("🎉 Congratulations! You got an offer!")
+        st.subheader("✅ Discount Applied For These Products:")
+        st.table(discount_products[["Product", "Frequency", "OfferType"]])
+    else:
+        st.info("ℹ️ No product eligible for discount.")
 
-if not discount_products.empty:
-    st.success("🎉 Congratulations! You got an offer!")
-    st.subheader("✅ Discount Applied For These Products:")
-    st.table(discount_products[["Product", "Frequency", "OfferType"]])
-else:
-    st.info("ℹ️ No product eligible for discount.")
+    # ✅ Billing summary
+    st.subheader("📌 Billing Summary")
+    st.write(f"**Total Amount (Before Discount):** ₹{billing['Amount'].sum():,.2f}")
+    st.write(f"**Total Discount Applied:** ₹{billing['Discount_Rs'].sum():,.2f}")
+    st.write(f"**💰 Final Amount Payable:** **₹{billing['FinalAmount'].sum():,.2f}**")
 
-# ----------------------------------------------------------
-
-st.subheader("📌 Billing Summary")
-st.write(f"**Total Amount (Before Discount):** ₹{billing['Amount'].sum():,.2f}")
-st.write(f"**Total Discount Applied:** ₹{billing['Discount_Rs'].sum():,.2f}")
-st.write(f"**💰 Final Amount Payable:** **₹{billing['FinalAmount'].sum():,.2f}**")
