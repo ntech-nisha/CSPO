@@ -7,7 +7,7 @@ Original file is located at
     https://colab.research.google.com/drive/1Zz13J7DGH8oOigICLSX3_-z1PO36NGa-
 """
 # ==============================================================
-# CUSTOMER RFM + OFFER + BILLING DASHBOARD
+# CUSTOMER RFM + OFFER + BILLING DASHBOARD (ERROR-FREE VERSION)
 # ==============================================================
 
 import streamlit as st
@@ -64,7 +64,6 @@ if uploaded_file:
         st.error(f"❌ Missing Required Columns: {', '.join(missing)}")
         st.stop()
 
-    # Rename DF to standard format
     df = df.rename(columns={
         column_map["invoice"]: "Invoice",
         column_map["product"]: "Product",
@@ -74,15 +73,11 @@ if uploaded_file:
         column_map["invoicedate"]: "InvoiceDate"
     })
 
-    # Ensure data types
     df["InvoiceDate"] = pd.to_datetime(df["InvoiceDate"], errors="coerce")
     df["Price"] = pd.to_numeric(df["Price"], errors="coerce").fillna(0)
     df["Quantity"] = pd.to_numeric(df["Quantity"], errors="coerce").fillna(0)
 
-    # Create Amount column
     df["Amount"] = df["Quantity"] * df["Price"]
-
-    # Remove rows with missing required fields (prevent NaN issues)
     df.dropna(subset=["CustomerID", "Product", "Amount"], inplace=True)
 
     # ----------------------------------------------------------
@@ -98,7 +93,6 @@ if uploaded_file:
 
     rfm.columns = ["CustomerID", "Recency", "Frequency", "Monetary"]
 
-    # KMeans without NaN values
     rfm_clean = rfm[["Recency", "Frequency", "Monetary"]].fillna(0)
 
     kmeans = KMeans(n_clusters=4, random_state=42)
@@ -114,92 +108,76 @@ if uploaded_file:
 
     fig2 = px.bar(rfm, x="Cluster", y="CustomerID", title="Customer Count in Each Cluster", color="Cluster")
     st.plotly_chart(fig2, use_container_width=True)
-    # ----------------------------------------------------------
-# ✅ Separate R / F / M Bar Graphs
-# ----------------------------------------------------------
-st.subheader("📊 RFM Visualization – Separate Bar Charts")
 
-col1, col2, col3 = st.columns(3)
+    # --------------------------------------------------------------
+    # ✅ Separate Bar Charts
+    # --------------------------------------------------------------
+    st.subheader("📊 RFM Visualization – Separate Bar Charts")
 
-with col1:
-    st.write("🟦 Recency (Lower = Better)")
-    fig_r = px.bar(rfm, x="CustomerID", y="Recency", title="Recency")
-    st.plotly_chart(fig_r, use_container_width=True)
+    col1, col2, col3 = st.columns(3)
 
-with col2:
-    st.write("🟩 Frequency (Higher = Better)")
-    fig_f = px.bar(rfm, x="CustomerID", y="Frequency", title="Frequency")
-    st.plotly_chart(fig_f, use_container_width=True)
+    with col1:
+        fig_r = px.bar(rfm, x="CustomerID", y="Recency", title="Recency")
+        st.plotly_chart(fig_r, use_container_width=True)
 
-with col3:
-    st.write("🟧 Monetary (Higher = Better)")
-    fig_m = px.bar(rfm, x="CustomerID", y="Monetary", title="Monetary (₹)")
-    st.plotly_chart(fig_m, use_container_width=True)
+    with col2:
+        fig_f = px.bar(rfm, x="CustomerID", y="Frequency", title="Frequency")
+        st.plotly_chart(fig_f, use_container_width=True)
 
-    
+    with col3:
+        fig_m = px.bar(rfm, x="CustomerID", y="Monetary", title="Monetary (₹)")
+        st.plotly_chart(fig_m, use_container_width=True)
 
-    # ----------------------------------------------------------
-# Product-wise Billing (frequency based on Invoice count)
-# ----------------------------------------------------------
+    # --------------------------------------------------------------
+    # ✅ Customer Billing Section
+    # --------------------------------------------------------------
+    st.subheader("🧾 Customer Billing")
 
-cust_df = df[df["CustomerID"] == customer_id_input]
+    customer_id_input = st.number_input("🔍 Enter Customer ID to view billing", min_value=0, step=1)
 
-billing = (
-    cust_df.groupby("Product")
-    .agg(
-        Frequency=("Invoice", "nunique"),       # ✅ invoice-based frequency
-        Qty=("Quantity", "sum"),
-        Amount=("Amount", "sum"),
-        BoughtDates=("InvoiceDate", lambda x: ", ".join(pd.to_datetime(x).dt.strftime("%d-%m-%Y").unique()))
-    )
-    .reset_index()
-)
+    if customer_id_input:
+        cust_df = df[df["CustomerID"] == customer_id_input]
 
-# Apply offer type
-def get_offer_type(freq):
-    if freq >= 5:
-        return "Big Discount"
-    elif freq >= 3:
-        return "Medium Discount"
-    elif freq >= 2:
-        return "Small Discount"
-    return "No Discount"
+        billing = (
+            cust_df.groupby("Product")
+            .agg(
+                Frequency=("Invoice", "nunique"),
+                Qty=("Quantity", "sum"),
+                Amount=("Amount", "sum"),
+                BoughtDates=("InvoiceDate", lambda x: ", ".join(pd.to_datetime(x).dt.strftime("%d-%m-%Y").unique()))
+            )
+            .reset_index()
+        )
 
-billing["OfferType"] = billing["Frequency"].apply(get_offer_type)
+        # Offer Type Logic
+        def get_offer(freq):
+            if freq >= 5:
+                return "Big Discount"
+            elif freq >= 3:
+                return "Medium Discount"
+            elif freq >= 2:
+                return "Small Discount"
+            return "No Discount"
 
-# Assign default sidebar discount %
-billing["Discount%"] = billing["OfferType"].map({
-    "Big Discount": big,
-    "Medium Discount": medium,
-    "Small Discount": small,
-    "No Discount": 0
-})
+        billing["OfferType"] = billing["Frequency"].apply(get_offer)
 
-# Convert percentage → INR discount (rounded integer rupees)
-billing["Discount_Rs"] = ((billing["Amount"] * billing["Discount%"]) / 100).astype(int)
+        billing["Discount%"] = billing["OfferType"].map({
+            "Big Discount": big_discount,
+            "Medium Discount": medium_discount,
+            "Small Discount": small_discount,
+            "No Discount": 0
+        })
 
-billing["FinalAmount"] = billing["Amount"] - billing["Discount_Rs"]
+        billing["Discount_Rs"] = (billing["Amount"] * billing["Discount%"] / 100).astype(int)
+        billing["FinalAmount"] = billing["Amount"] - billing["Discount_Rs"]
 
-st.subheader("📄 Product-wise Billing Table")
-
-st.dataframe(
-    billing[["Product", "Frequency", "BoughtDates", "Qty", "Amount", "OfferType", "Discount_Rs", "FinalAmount"]],
-    use_container_width=True
-)
-
-
-        # Apply discount (only integer rupees)
-        cust_summary["Discount_Rs"] = (cust_summary["Amount"] * discount_percent / 100).astype(int)
-        cust_summary["FinalAmount"] = cust_summary["Amount"] - cust_summary["Discount_Rs"]
-
-        st.subheader("🧾 Product-wise Billing Table")
-        st.dataframe(cust_summary)
-
-        total = cust_summary["FinalAmount"].sum()
+        st.subheader("📄 Product-wise Billing Table")
+        st.dataframe(
+            billing[["Product", "Frequency", "BoughtDates", "Qty", "Amount", "OfferType", "Discount_Rs", "FinalAmount"]],
+            use_container_width=True
+        )
 
         st.subheader("📌 Billing Summary")
-        st.write(f"**Total Products:** {freq}")
-        st.write(f"**Offer Type:** {offer}")
-        st.write(f"**Discount Applied:** {discount_percent}%")
-        st.write(f"**Final Bill Amount:** ₹{total}")
-
+        st.write(f"**Total Amount (Before Discount):** ₹{billing['Amount'].sum():,.2f}")
+        st.write(f"**Total Discount Applied:** ₹{billing['Discount_Rs'].sum():,.2f}")
+        st.write(f"**💰 Final Amount Payable:** **₹{billing['FinalAmount'].sum():,.2f}**")
