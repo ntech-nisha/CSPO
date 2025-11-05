@@ -43,26 +43,26 @@ uploaded = st.file_uploader("📂 Upload Excel file", type=["xlsx", "xls"])
 if uploaded:
     df = pd.read_excel(uploaded)
 
-    # Auto rename columns if they exist
+    # Auto rename columns if matched
     df.rename(columns=COLUMN_MAPPING, inplace=True)
 
     required_cols = {"CustomerID", "Amount", "InvoiceDate", "Product"}
 
     if not required_cols.issubset(df.columns):
-        st.error(f"❌ Excel file does not contain required columns\nRequired → {required_cols}\nFound → {set(df.columns)}")
+        st.error(f"❌ Required columns missing\nNeeded → {required_cols}\nFound → {set(df.columns)}")
         st.stop()
 
     df["InvoiceDate"] = pd.to_datetime(df["InvoiceDate"], errors="coerce")
     df.dropna(subset=["InvoiceDate"], inplace=True)
 
-    st.success("✅ File uploaded. Columns auto-mapped successfully.")
+    st.success("✅ File uploaded successfully.")
 
     # ✅ DATA PREVIEW
     st.write("### 👀 Data Preview")
     st.dataframe(df.head())
 
     # ------------------------------------------------------------------------------------------------
-    #  ✅ R F M   C A L C U L A T I O N
+    # ✅ R F M   C A L C U L A T I O N — SAFE FOR KMEANS (NO NaN / INF)
     # ------------------------------------------------------------------------------------------------
     st.subheader("📊 RFM Segmentation")
 
@@ -76,61 +76,64 @@ if uploaded:
 
     rfm.columns = ["CustomerID", "Recency", "Frequency", "Monetary"]
 
-    # Fix NaN / Infinite issues before clustering
-    rfm.fillna(0, inplace=True)
-    rfm = rfm.replace([float('inf'), -float('inf')], 0)
+    # ✅ FIX: avoid NaN / inf and type casting for KMeans
+    rfm.replace([float("inf"), -float("inf")], 0, inplace=True)
+    rfm["Recency"] = rfm["Recency"].fillna(0).astype(int)
+    rfm["Frequency"] = rfm["Frequency"].fillna(0).astype(int)
+    rfm["Monetary"] = rfm["Monetary"].fillna(0).astype(float)
 
-    # KMeans
+    # ✅ KMeans Clustering (NO NAN ERROR)
     kmeans = KMeans(n_clusters=3, random_state=0)
     rfm["Cluster"] = kmeans.fit_predict(rfm[["Recency", "Frequency", "Monetary"]])
 
     # ------------------------------------------------------------------------------------------------
-    #  ✅ R F M   V I S U A L I Z A T I O N (Bar + Scatter)
+    # ✅ R F M V I S U A L I Z A T I O N
     # ------------------------------------------------------------------------------------------------
-
-    # Bar Graph – Monetary by Cluster
-    st.write("### 📈 Bar Graph: Total Monetary Value by Cluster")
+    st.write("### 📈 Cluster-wise Monetary Value (Bar Chart)")
     bar = rfm.groupby("Cluster")["Monetary"].sum().reset_index()
     fig = px.bar(bar, x="Cluster", y="Monetary")
     st.plotly_chart(fig, use_container_width=True)
 
-    # Scatter – Frequency vs Monetary
-    st.write("### 📌 Scatter Plot: Frequency vs Monetary")
+    st.write("### 📌 Frequency vs Monetary (Customer Level)")
     fig2 = px.scatter(rfm, x="Frequency", y="Monetary", color="Cluster", hover_data=["CustomerID"])
     st.plotly_chart(fig2, use_container_width=True)
 
-    st.success("✅ RFM clustering & visualization completed.")
-# ==========================================================================================
-# ✅ CUSTOMER DISCOUNT – PRODUCT LEVEL EDITABLE DISCOUNT (₹ / % Both)
-# ==========================================================================================
+    st.success("✅ RFM Clustering Completed.")
+
+# =================================================================================================
+# ✅ PRODUCT LEVEL BILLING – DISCOUNT EDITABLE (INTEGER ₹)
+# =================================================================================================
 
 st.subheader("💳 Apply Discount Per Product (Editable %)")
 
-customer_id_input = st.text_input("🔍 Enter Customer ID to view purchase & offer details")
+customer_id_input = st.text_input("🔍 Enter Customer ID to view billing details")
 
 if customer_id_input:
     try:
         customer_id_input = int(customer_id_input)
     except:
-        st.error("❌ CustomerID must be a number")
+        st.error("❌ Customer ID must be a number")
         st.stop()
 
     cust_df = df[df["CustomerID"] == customer_id_input]
 
     if cust_df.empty:
-        st.warning("⚠️ No records found for this Customer ID")
+        st.warning("⚠️ No data found for this Customer ID")
         st.stop()
 
+    # ✅ PRODUCT WISE FREQUENCY + PURCHASE DATES
     cust_grouped = (
         cust_df.groupby("Product")
         .agg({
             "Amount": "sum",
-            "InvoiceDate": lambda x: ', '.join(x.dt.strftime("%Y-%m-%d").unique()),
-            "Product": "count"
+            "InvoiceDate": lambda x: ", ".join(sorted(x.dt.strftime("%Y-%m-%d").unique())),
+            "Product": "count"        # Frequency = how many times product bought
         })
-    ).rename(columns={"Product": "Frequency"}).reset_index()
+        .rename(columns={"Product": "Frequency"})
+        .reset_index()
+    )
 
-    # Offer logic
+    # OFFER TYPE BASED ON FREQUENCY
     def offer_type(freq):
         if freq >= 5:
             return "Big Discount"
@@ -144,37 +147,45 @@ if customer_id_input:
     st.write("### 🧾 Product-wise Purchase Summary")
     st.dataframe(cust_grouped)
 
+    # ------------------------------------------------------------------------------------------------
+    # ✅ DISCOUNT APPLY SECTION (INTEGER ₹)
+    # ------------------------------------------------------------------------------------------------
     st.write("### ✏️ Apply Discount per Product")
 
     final_bill = []
     total_final = 0
 
     for i, row in cust_grouped.iterrows():
-        st.markdown(f"#### 🛒 {row['Product']} ({row['Offer Type']})")
+        st.markdown(f"#### 🛒 Product: **{row['Product']}** ({row['Offer Type']})")
+        st.write(f"📅 Purchased Dates → {row['InvoiceDate']}")
+        st.write(f"🛍 Frequency → {row['Frequency']} times")
 
         discount_percent = st.number_input(
             f"Enter Discount % for {row['Product']}",
             min_value=0, max_value=100, step=1, key=f"disc_{i}"
         )
 
-        discount_rupees = (row["Amount"] * discount_percent) / 100
-        payable_amount = row["Amount"] - discount_rupees
+        # ✅ DISCOUNT MUST BE INTEGER (₹)
+        discount_rupees = int((row["Amount"] * discount_percent) / 100)
+        payable_amount = int(row["Amount"] - discount_rupees)
 
         final_bill.append([row["Product"], row["Amount"], discount_percent, discount_rupees, payable_amount])
-
         total_final += payable_amount
 
-        st.write(f"➡️ Discount ₹: **{discount_rupees:,.2f}**")
-        st.write(f"➡️ Final Amount ₹: **{payable_amount:,.2f}**")
+        st.write(f"➡️ Discount ₹: **{discount_rupees}**")
+        st.write(f"➡️ Final Amount ₹: **{payable_amount}**")
         st.markdown("---")
 
-    # Final Summary Table
-    final_df = pd.DataFrame(final_bill, columns=["Product", "Original Amount", "Discount %", "Discount (₹)", "Final Amount"])
+    # ✅ SUMMARY TABLE
+    final_df = pd.DataFrame(
+        final_bill,
+        columns=["Product", "Original Amount", "Discount %", "Discount (₹)", "Final Amount (₹)"]
+    )
 
     st.write("### ✅ Final Billing Summary")
     st.dataframe(final_df)
 
-    st.markdown(f"## 🟢 Total Payable after Discount: ₹ **{total_final:,.2f}**")
+    st.markdown(f"## 🟢 Total Payable after Discount: ₹ **{total_final}**")
 
 
 
