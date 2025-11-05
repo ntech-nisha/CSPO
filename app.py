@@ -114,48 +114,79 @@ if uploaded_file:
 
     fig2 = px.bar(rfm, x="Cluster", y="CustomerID", title="Customer Count in Each Cluster", color="Cluster")
     st.plotly_chart(fig2, use_container_width=True)
+    # ----------------------------------------------------------
+# ✅ Separate R / F / M Bar Graphs
+# ----------------------------------------------------------
+st.subheader("📊 RFM Visualization – Separate Bar Charts")
+
+col1, col2, col3 = st.columns(3)
+
+with col1:
+    st.write("🟦 Recency (Lower = Better)")
+    fig_r = px.bar(rfm, x="CustomerID", y="Recency", title="Recency")
+    st.plotly_chart(fig_r, use_container_width=True)
+
+with col2:
+    st.write("🟩 Frequency (Higher = Better)")
+    fig_f = px.bar(rfm, x="CustomerID", y="Frequency", title="Frequency")
+    st.plotly_chart(fig_f, use_container_width=True)
+
+with col3:
+    st.write("🟧 Monetary (Higher = Better)")
+    fig_m = px.bar(rfm, x="CustomerID", y="Monetary", title="Monetary (₹)")
+    st.plotly_chart(fig_m, use_container_width=True)
+
     
 
     # ----------------------------------------------------------
-    # ✅ Customer ID Input for Billing
-    # ----------------------------------------------------------
-    st.subheader("💳 Find Customer Purchase Details")
-    customer_input = st.text_input("Enter Customer ID")
+# Product-wise Billing (frequency based on Invoice count)
+# ----------------------------------------------------------
 
-    if customer_input:
-        try:
-            customer_input = int(customer_input)
-        except:
-            st.error("❌ CustomerID must be numeric")
-            st.stop()
+cust_df = df[df["CustomerID"] == customer_id_input]
 
-        cust_df = df[df["CustomerID"] == customer_input]
+billing = (
+    cust_df.groupby("Product")
+    .agg(
+        Frequency=("Invoice", "nunique"),       # ✅ invoice-based frequency
+        Qty=("Quantity", "sum"),
+        Amount=("Amount", "sum"),
+        BoughtDates=("InvoiceDate", lambda x: ", ".join(pd.to_datetime(x).dt.strftime("%d-%m-%Y").unique()))
+    )
+    .reset_index()
+)
 
-        if cust_df.empty:
-            st.error("❌ Customer not found")
-            st.stop()
+# Apply offer type
+def get_offer_type(freq):
+    if freq >= 5:
+        return "Big Discount"
+    elif freq >= 3:
+        return "Medium Discount"
+    elif freq >= 2:
+        return "Small Discount"
+    return "No Discount"
 
-        cust_summary = cust_df.groupby(["Product"]).agg({
-            "Quantity": "sum",
-            "Amount": "sum",
-            "InvoiceDate": lambda x: ", ".join(x.dt.strftime('%Y-%m-%d').unique())
-        }).reset_index()
+billing["OfferType"] = billing["Frequency"].apply(get_offer_type)
 
-        # Determine offer type
-        freq = cust_summary.shape[0]
+# Assign default sidebar discount %
+billing["Discount%"] = billing["OfferType"].map({
+    "Big Discount": big,
+    "Medium Discount": medium,
+    "Small Discount": small,
+    "No Discount": 0
+})
 
-        if freq >= 5:
-            offer = "Big Discount"
-            discount_percent = big_discount
-        elif freq >= 3:
-            offer = "Medium Discount"
-            discount_percent = medium_discount
-        elif freq >= 2:
-            offer = "Small Discount"
-            discount_percent = small_discount
-        else:
-            offer = "No Discount"
-            discount_percent = 0
+# Convert percentage → INR discount (rounded integer rupees)
+billing["Discount_Rs"] = ((billing["Amount"] * billing["Discount%"]) / 100).astype(int)
+
+billing["FinalAmount"] = billing["Amount"] - billing["Discount_Rs"]
+
+st.subheader("📄 Product-wise Billing Table")
+
+st.dataframe(
+    billing[["Product", "Frequency", "BoughtDates", "Qty", "Amount", "OfferType", "Discount_Rs", "FinalAmount"]],
+    use_container_width=True
+)
+
 
         # Apply discount (only integer rupees)
         cust_summary["Discount_Rs"] = (cust_summary["Amount"] * discount_percent / 100).astype(int)
