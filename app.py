@@ -79,11 +79,12 @@ if uploaded_file:
 
     df["Amount"] = df["Quantity"] * df["Price"]
     df.dropna(subset=["CustomerID", "Product", "Amount"], inplace=True)
+    # ----------------------------------------------------------
+    # ✅ RFM Calculation
+    # ----------------------------------------------------------
+    max_date = df["InvoiceDate"].max()
 
-   # ----------------------------------------------------------
-# ✅ RFM Calculation
-# ----------------------------------------------------------
-max_date = df["InvoiceDate"].max()
+
 
 rfm = df.groupby("CustomerID").agg({
     "InvoiceDate": lambda x: (max_date - x.max()).days,  # Recency
