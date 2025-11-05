@@ -108,25 +108,27 @@ if uploaded_file:
 
     fig2 = px.bar(rfm, x="Cluster", y="CustomerID", title="Customer Count in Each Cluster", color="Cluster")
     st.plotly_chart(fig2, use_container_width=True)
+# --------------------------------------------------------------
+# ✅ R, F, M Cluster-wise Bar Graphs
+# --------------------------------------------------------------
+st.subheader("📊 RFM Visualization – Cluster Bar Graphs")
 
-    # --------------------------------------------------------------
-    # ✅ Separate Bar Charts
-    # --------------------------------------------------------------
-    st.subheader("📊 RFM Visualization – Separate Bar Charts")
+col1, col2, col3 = st.columns(3)
 
-    col1, col2, col3 = st.columns(3)
+with col1:
+    st.write("🟦 Recency (Lower = Better)")
+    fig_r = px.bar(rfm, x="Cluster", y="Recency", color="Cluster", title="Recency by Cluster")
+    st.plotly_chart(fig_r, use_container_width=True)
 
-    with col1:
-        fig_r = px.bar(rfm, x="CustomerID", y="Recency", title="Recency")
-        st.plotly_chart(fig_r, use_container_width=True)
+with col2:
+    st.write("🟩 Frequency (Higher = Better)")
+    fig_f = px.bar(rfm, x="Cluster", y="Frequency", color="Cluster", title="Frequency by Cluster")
+    st.plotly_chart(fig_f, use_container_width=True)
 
-    with col2:
-        fig_f = px.bar(rfm, x="CustomerID", y="Frequency", title="Frequency")
-        st.plotly_chart(fig_f, use_container_width=True)
-
-    with col3:
-        fig_m = px.bar(rfm, x="CustomerID", y="Monetary", title="Monetary (₹)")
-        st.plotly_chart(fig_m, use_container_width=True)
+with col3:
+    st.write("🟧 Monetary (Higher = Better)")
+    fig_m = px.bar(rfm, x="Cluster", y="Monetary", color="Cluster", title="Monetary by Cluster (₹)")
+    st.plotly_chart(fig_m, use_container_width=True)
 
     # --------------------------------------------------------------
     # ✅ Customer Billing Section
@@ -171,13 +173,26 @@ if uploaded_file:
         billing["Discount_Rs"] = (billing["Amount"] * billing["Discount%"] / 100).astype(int)
         billing["FinalAmount"] = billing["Amount"] - billing["Discount_Rs"]
 
-        st.subheader("📄 Product-wise Billing Table")
-        st.dataframe(
-            billing[["Product", "Frequency", "BoughtDates", "Qty", "Amount", "OfferType", "Discount_Rs", "FinalAmount"]],
-            use_container_width=True
-        )
+      st.subheader("📄 Product-wise Billing Table")
+st.dataframe(
+    billing[["Product", "Frequency", "BoughtDates", "Qty", "Amount", "OfferType", "Discount_Rs", "FinalAmount"]],
+    use_container_width=True
+)
 
-        st.subheader("📌 Billing Summary")
-        st.write(f"**Total Amount (Before Discount):** ₹{billing['Amount'].sum():,.2f}")
-        st.write(f"**Total Discount Applied:** ₹{billing['Discount_Rs'].sum():,.2f}")
-        st.write(f"**💰 Final Amount Payable:** **₹{billing['FinalAmount'].sum():,.2f}**")
+# ------------------ NEW CODE ADDED HERE ------------------
+
+discount_products = billing[billing["OfferType"] != "No Discount"]
+
+if not discount_products.empty:
+    st.success("🎉 Congratulations! You got an offer!")
+    st.subheader("✅ Discount Applied For These Products:")
+    st.table(discount_products[["Product", "Frequency", "OfferType"]])
+else:
+    st.info("ℹ️ No product eligible for discount.")
+
+# ----------------------------------------------------------
+
+st.subheader("📌 Billing Summary")
+st.write(f"**Total Amount (Before Discount):** ₹{billing['Amount'].sum():,.2f}")
+st.write(f"**Total Discount Applied:** ₹{billing['Discount_Rs'].sum():,.2f}")
+st.write(f"**💰 Final Amount Payable:** **₹{billing['FinalAmount'].sum():,.2f}**")
