@@ -80,36 +80,40 @@ if uploaded_file:
     df["Amount"] = df["Quantity"] * df["Price"]
     df.dropna(subset=["CustomerID", "Product", "Amount"], inplace=True)
 
-    # ----------------------------------------------------------
-    # ✅ RFM Calculation
-    # ----------------------------------------------------------
-    max_date = df["InvoiceDate"].max()
+   # ----------------------------------------------------------
+# ✅ RFM Calculation
+# ----------------------------------------------------------
+max_date = df["InvoiceDate"].max()
 
-    rfm = df.groupby("CustomerID").agg({
-        "InvoiceDate": lambda x: (max_date - x.max()).days,  # Recency
-        "Invoice": "nunique",  # Frequency
-        "Amount": "sum"  # Monetary
-    }).reset_index()
+rfm = df.groupby("CustomerID").agg({
+    "InvoiceDate": lambda x: (max_date - x.max()).days,  # Recency
+    "Invoice": "nunique",  # Frequency
+    "Amount": "sum"  # Monetary
+}).reset_index()
 
-    rfm.columns = ["CustomerID", "Recency", "Frequency", "Monetary"]
+rfm.columns = ["CustomerID", "Recency", "Frequency", "Monetary"]
 
-    rfm_clean = rfm[["Recency", "Frequency", "Monetary"]].fillna(0)
+rfm_clean = rfm[["Recency", "Frequency", "Monetary"]].fillna(0)
 
-    kmeans = KMeans(n_clusters=4, random_state=42)
-    rfm["Cluster"] = kmeans.fit_predict(rfm_clean)
+kmeans = KMeans(n_clusters=4, random_state=42)
+rfm["Cluster"] = kmeans.fit_predict(rfm_clean)
 
-    # ----------------------------------------------------------
-    # ✅ RFM Graphs
-    # ----------------------------------------------------------
-    st.subheader("📊 RFM Clustering")
+# ----------------------------------------------------------
+# ✅ RFM Graphs
+# ----------------------------------------------------------
+st.subheader("📊 RFM Clustering (Scatter + Bar)")
 
-    fig1 = px.scatter(rfm, x="Recency", y="Monetary", color="Cluster", title="Recency vs Monetary")
-    st.plotly_chart(fig1, use_container_width=True)
+fig1 = px.scatter(rfm, x="Recency", y="Monetary", color="Cluster",
+                  title="Recency vs Monetary")
+st.plotly_chart(fig1, use_container_width=True)
 
-    fig2 = px.bar(rfm, x="Cluster", y="CustomerID", title="Customer Count in Each Cluster", color="Cluster")
-    st.plotly_chart(fig2, use_container_width=True)
+fig2 = px.bar(rfm, x="Cluster", y="CustomerID",
+              title="Customer Count in Each Cluster", color="Cluster")
+st.plotly_chart(fig2, use_container_width=True)
+
+
 # --------------------------------------------------------------
-# ✅ R, F, M Cluster-wise Bar Graphs
+# ✅ R, F, M Cluster-wise Bar Graphs  (✅ FIXED — inside same block)
 # --------------------------------------------------------------
 st.subheader("📊 RFM Visualization – Cluster Bar Graphs")
 
@@ -117,18 +121,22 @@ col1, col2, col3 = st.columns(3)
 
 with col1:
     st.write("🟦 Recency (Lower = Better)")
-    fig_r = px.bar(rfm, x="Cluster", y="Recency", color="Cluster", title="Recency by Cluster")
+    fig_r = px.bar(rfm, x="Cluster", y="Recency", color="Cluster",
+                   title="Recency by Cluster")
     st.plotly_chart(fig_r, use_container_width=True)
 
 with col2:
     st.write("🟩 Frequency (Higher = Better)")
-    fig_f = px.bar(rfm, x="Cluster", y="Frequency", color="Cluster", title="Frequency by Cluster")
+    fig_f = px.bar(rfm, x="Cluster", y="Frequency", color="Cluster",
+                   title="Frequency by Cluster")
     st.plotly_chart(fig_f, use_container_width=True)
 
 with col3:
     st.write("🟧 Monetary (Higher = Better)")
-    fig_m = px.bar(rfm, x="Cluster", y="Monetary", color="Cluster", title="Monetary by Cluster (₹)")
+    fig_m = px.bar(rfm, x="Cluster", y="Monetary", color="Cluster",
+                   title="Monetary by Cluster (₹)")
     st.plotly_chart(fig_m, use_container_width=True)
+
 # --------------------------------------------------------------
 # ✅ Customer Billing Section
 # --------------------------------------------------------------
