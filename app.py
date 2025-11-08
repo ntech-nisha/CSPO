@@ -97,14 +97,14 @@ if uploaded_file:
     fig1 = px.scatter(
         rfm, x="Recency", y="Monetary", color="Cluster",
         title="Recency vs Monetary",
-        color_discrete_sequence=["#002147", "#007BFF", "#66B2FF", "#B3D9FF"]
+           color_discrete_sequence=["#FF1493", "#FF69B4", "#FFB6C1", "#FFD9E8"]
     )
     st.plotly_chart(fig1, use_container_width=True)
 
     fig2 = px.bar(
         rfm, x="Cluster", y="CustomerID", title="Customer Count in Each Cluster",
         color="Cluster",
-        color_discrete_sequence=["#006400", "#00FF7F", "#98FB98", "#C1FFC1"]
+           color_discrete_sequence=["#FF1493", "#FF69B4", "#FFB6C1", "#FFD9E8"]
     )
     st.plotly_chart(fig2, use_container_width=True)
 
@@ -117,7 +117,7 @@ if uploaded_file:
         fig_r = px.bar(
             rfm, x="Cluster", y="Recency", color="Cluster",
             title="Recency by Cluster",
-            color_discrete_sequence=["#002147", "#007BFF", "#66B2FF", "#B3D9FF"]
+              color_discrete_sequence=["#FF1493", "#FF69B4", "#FFB6C1", "#FFD9E8"]
         )
         st.plotly_chart(fig_r, use_container_width=True)
 
@@ -125,7 +125,7 @@ if uploaded_file:
         fig_f = px.bar(
             rfm, x="Cluster", y="Frequency", color="Cluster",
             title="Frequency by Cluster",
-            color_discrete_sequence=["#FF1493", "#FF69B4", "#FFB6C1", "#FFD9E8"]
+             color_discrete_sequence=["#FF1493", "#FF69B4", "#FFB6C1", "#FFD9E8"]
         )
         st.plotly_chart(fig_f, use_container_width=True)
 
@@ -133,7 +133,7 @@ if uploaded_file:
         fig_m = px.bar(
             rfm, x="Cluster", y="Monetary", color="Cluster",
             title="Monetary by Cluster (₹)",
-            color_discrete_sequence=["#FFB300", "#FFC300", "#FFD966", "#FFF2B2"]
+              color_discrete_sequence=["#FF1493", "#FF69B4", "#FFB6C1", "#FFD9E8"]
         )
         st.plotly_chart(fig_m, use_container_width=True)
 
