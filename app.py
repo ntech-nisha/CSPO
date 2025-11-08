@@ -7,198 +7,171 @@ Original file is located at
     https://colab.research.google.com/drive/1Zz13J7DGH8oOigICLSX3_-z1PO36NGa-
 """
 
-# app.py
+# ==============================================================
+# CUSTOMER RFM + OFFER + BILLING DASHBOARD (ERROR-FREE VERSION)
+# ==============================================================
+
 import streamlit as st
 import pandas as pd
 import numpy as np
-from sklearn.preprocessing import StandardScaler
+from datetime import datetime
 from sklearn.cluster import KMeans
 import plotly.express as px
 
-st.set_page_config(page_title="Customer RFM + Billing (India)", layout="wide")
-st.title("🛍️ Customer RFM + Indian Billing Dashboard")
+# --------------------------------------------------------------
+# ✅ Streamlit settings
+# --------------------------------------------------------------
+st.set_page_config(page_title="Customer RFM + Offer + Billing", layout="wide")
+st.title("🛍️ Customer RFM + Offers + Billing (India)")
 
-# -------------------------
-# Helpers
-# -------------------------
-def find_col(df, candidates):
-    for c in candidates:
-        if c in df.columns:
-            return c
-    lower_cols = {col.lower(): col for col in df.columns}
-    for c in candidates:
-        if c.lower() in lower_cols:
-            return lower_cols[c.lower()]
-    return None
+# --------------------------------------------------------------
+# ✅ Sidebar Discount Edit (User Controlled)
+# --------------------------------------------------------------
+st.sidebar.subheader("✏️ Edit Discount Percentage")
 
+small_discount = st.sidebar.number_input("Small Discount % (2 products)", min_value=0, max_value=100, value=5)
+medium_discount = st.sidebar.number_input("Medium Discount % (3 products)", min_value=0, max_value=100, value=10)
+big_discount = st.sidebar.number_input("Big Discount % (5+ products)", min_value=0, max_value=100, value=20)
 
-# -------------------------
-# Sidebar: discount & clustering settings
-# -------------------------
-st.sidebar.header("⚙️ Settings")
-big_discount = st.sidebar.number_input("Big Discount % (freq >= 5)", min_value=0, max_value=100, value=20, step=1)
-medium_discount = st.sidebar.number_input("Medium Discount % (freq >= 3)", min_value=0, max_value=100, value=10, step=1)
-small_discount = st.sidebar.number_input("Small Discount % (freq >= 2)", min_value=0, max_value=100, value=5, step=1)
-n_clusters = st.sidebar.slider("K (clusters for KMeans)", min_value=2, max_value=8, value=4)
-show_cluster_table = st.sidebar.checkbox("Show cluster summary table", value=False)
-
-# -------------------------
-# 1) File upload
-# -------------------------
-st.header("1️⃣ Upload sales/transactions file (CSV or Excel)")
-uploaded_file = st.file_uploader("Upload CSV / XLSX file", type=["csv", "xlsx"])
-
+# --------------------------------------------------------------
+# ✅ File Upload Section
+# --------------------------------------------------------------
+uploaded_file = st.file_uploader("📂 Upload your Excel/CSV file", type=["xlsx", "csv"])
 
 if uploaded_file:
-    if uploaded_file.name.lower().endswith(".csv"):
-        df = pd.read_csv(uploaded_file, dtype=str)
-    else:
-        df = pd.read_excel(uploaded_file, dtype=str)
+    # Auto-read file
+    df = pd.read_csv(uploaded_file) if uploaded_file.name.endswith(".csv") else pd.read_excel(uploaded_file)
+    st.success("✅ File uploaded successfully!")
 
-    df.columns = [c.strip() for c in df.columns]
+    # Normalize columns
+    df.columns = [c.lower() for c in df.columns]
 
-    product_col = find_col(df, ["Product", "Description", "Item", "Product Name", "description"])
-    customer_col = find_col(df, ["Customer ID", "CustomerID", "customer_id", "custid", "CID"])
-    price_col = find_col(df, ["Price", "UnitPrice", "Unit Price", "TotalPrice", "Amount", "rate"])
-    qty_col = find_col(df, ["Quantity", "Qty", "QTY", "Units", "Count"])
-    invoice_date_col = find_col(df, ["InvoiceDate", "Invoice Date", "Date", "TransactionDate", "invoice_date"])
-    invoice_col = find_col(df, ["Invoice", "InvoiceNo", "Invoice Number", "InvoiceNo."])
+    column_map = {
+        "invoice": next((c for c in df.columns if "invoice" in c), None),
+        "product": next((c for c in df.columns if "desc" in c or "product" in c), None),
+        "price": next((c for c in df.columns if "price" in c), None),
+        "customerid": next((c for c in df.columns if "customer" in c or "cust" in c), None),
+        "quantity": next((c for c in df.columns if "qty" in c or "quantity" in c), None),
+        "invoicedate": next((c for c in df.columns if "date" in c), None),
+    }
 
-    missing = []
-    if not product_col:
-        missing.append("Product/Description")
-    if not customer_col:
-        missing.append("Customer ID")
-    if not price_col:
-        missing.append("Price")
+    # Validate Columns
+    missing = [k for k, v in column_map.items() if v is None]
     if missing:
-        st.error(f"Required column(s) missing: {', '.join(missing)}")
+        st.error(f"❌ Missing Required Columns: {', '.join(missing)}")
         st.stop()
 
-    df['Product'] = df[product_col].astype(str)
-    df['CustomerID'] = df[customer_col].astype(str).str.strip()
+    df = df.rename(columns={
+        column_map["invoice"]: "Invoice",
+        column_map["product"]: "Product",
+        column_map["price"]: "Price",
+        column_map["customerid"]: "CustomerID",
+        column_map["quantity"]: "Quantity",
+        column_map["invoicedate"]: "InvoiceDate"
+    })
 
-    df['Price'] = pd.to_numeric(df[price_col], errors='coerce').fillna(0.0)
-    df['Quantity'] = pd.to_numeric(df[qty_col], errors='coerce').fillna(1).astype(int) if qty_col else 1
+    df["InvoiceDate"] = pd.to_datetime(df["InvoiceDate"], errors="coerce")
+    df["Price"] = pd.to_numeric(df["Price"], errors="coerce").fillna(0)
+    df["Quantity"] = pd.to_numeric(df["Quantity"], errors="coerce").fillna(0)
+    df["Amount"] = df["Quantity"] * df["Price"]
+    df.dropna(subset=["CustomerID", "Product"], inplace=True)
 
-    if invoice_date_col:
-        df['InvoiceDate'] = pd.to_datetime(df[invoice_date_col], errors='coerce')
-    else:
-        df['InvoiceDate'] = pd.NaT
+    # ----------------------------------------------------------
+    # ✅ RFM Calculation
+    # ----------------------------------------------------------
+    max_date = df["InvoiceDate"].max()
 
-    df['TotalAmount'] = (df['Price'] * df['Quantity']).round(2)
+    rfm = df.groupby("CustomerID").agg({
+        "InvoiceDate": lambda x: (max_date - x.max()).days,  # Recency
+        "Invoice": "nunique",                                # Frequency
+        "Amount": "sum"                                      # Monetary
+    }).reset_index()
 
-    st.success("✅ File loaded and columns mapped.")
-    st.dataframe(df.head())
+    rfm.columns = ["CustomerID", "Recency", "Frequency", "Monetary"]
+    rfm_clean = rfm[["Recency", "Frequency", "Monetary"]].fillna(0)
 
-    # -------------------------
-    # 2) RFM Calculation
-    # -------------------------
-    st.header("2️⃣ RFM Calculation & Visuals")
+    kmeans = KMeans(n_clusters=4, random_state=42)
+    rfm["Cluster"] = kmeans.fit_predict(rfm_clean)
 
-    if df['InvoiceDate'].notna().any():
-        snapshot_date = df['InvoiceDate'].max() + pd.Timedelta(days=1)
-        rfm = df.groupby('CustomerID').agg({
-            'InvoiceDate': lambda x: (snapshot_date - x.max()).days,
-            'Product': 'count',
-            'TotalAmount': 'sum'
-        }).reset_index().rename(columns={'InvoiceDate': 'Recency', 'Product': 'Frequency', 'TotalAmount': 'Monetary'})
-    else:
-        rfm = df.groupby('CustomerID').agg({'Product': 'count', 'TotalAmount': 'sum'}).reset_index()
-        rfm.rename(columns={'Product': 'Frequency', 'TotalAmount': 'Monetary'}, inplace=True)
-        rfm['Recency'] = np.nan
+    # ----------------------------------------------------------
+    # ✅ RFM Plots
+    # ----------------------------------------------------------
+    st.subheader("📊 RFM Clustering (Scatter + Bar)")
 
-    st.dataframe(rfm.head())
+    fig1 = px.scatter(rfm, x="Recency", y="Monetary", color="Cluster", title="Recency vs Monetary")
+    st.plotly_chart(fig1, use_container_width=True)
 
-    # Clustering
-    rfm_clust = rfm.copy()
-    rfm_clust['Recency'] = rfm_clust['Recency'].fillna(rfm_clust['Recency'].median())
+    fig2 = px.bar(rfm, x="Cluster", y="CustomerID", title="Customer Count in Each Cluster", color="Cluster")
+    st.plotly_chart(fig2, use_container_width=True)
 
-    rfm_clust['R_log'] = np.log1p(rfm_clust['Recency'])
-    rfm_clust['F_log'] = np.log1p(rfm_clust['Frequency'])
-    rfm_clust['M_log'] = np.log1p(rfm_clust['Monetary'])
+    # ----------------------------------------------------------
+    # ✅ Bar Chart Group (Recency / Frequency / Monetary)
+    # ----------------------------------------------------------
+    st.subheader("📊 RFM Visualization – Cluster Bar Graphs")
 
-    scaler = StandardScaler()
-    X = scaler.fit_transform(rfm_clust[['R_log', 'F_log', 'M_log']])
+    col1, col2, col3 = st.columns(3)
 
-    kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
-    rfm['Cluster'] = kmeans.fit_predict(X)
+    with col1:
+        fig_r = px.bar(rfm, x="Cluster", y="Recency", color="Cluster", title="Recency by Cluster")
+        st.plotly_chart(fig_r, use_container_width=True)
 
-    if show_cluster_table:
-        st.dataframe(rfm.groupby('Cluster').mean())
+    with col2:
+        fig_f = px.bar(rfm, x="Cluster", y="Frequency", color="Cluster", title="Frequency by Cluster")
+        st.plotly_chart(fig_f, use_container_width=True)
 
-    fig3d = px.scatter_3d(rfm, x='Recency', y='Frequency', z='Monetary', color='Cluster', hover_data=['CustomerID'])
-    st.plotly_chart(fig3d, use_container_width=True)
+    with col3:
+        fig_m = px.bar(rfm, x="Cluster", y="Monetary", color="Cluster", title="Monetary by Cluster (₹)")
+        st.plotly_chart(fig_m, use_container_width=True)
 
-    # -------------------------
-    # 3) Customer → billing
-    # -------------------------
-    st.header("3️⃣ Customer Lookup → Invoice (Auto Discount)")
+    # --------------------------------------------------------------
+    # ✅ Customer Billing Section  (FIXED INDENTATION ✅)
+    # --------------------------------------------------------------
+    st.subheader("🧾 Customer Billing")
 
-    sample_ids = rfm['CustomerID'].astype(str).unique()[:10].tolist()
-    st.write("Customer ID samples:", sample_ids)
+    customer_id_input = st.number_input("🔍 Enter Customer ID to view billing", min_value=0, step=1)
 
-    cust_input = st.text_input("Enter Customer ID (exact match)")
+    if customer_id_input:
+        cust_df = df[df["CustomerID"] == customer_id_input]
 
-    if cust_input:
-        cust_tx = df[df['CustomerID'].astype(str) == cust_input]
+        billing = (
+            cust_df.groupby("Product")
+            .agg(
+                Frequency=("Invoice", "nunique"),
+                Qty=("Quantity", "sum"),
+                Amount=("Amount", "sum"),
+                BoughtDates=("InvoiceDate", lambda x: ", ".join(pd.to_datetime(x).dt.strftime("%d-%m-%Y").unique()))
+            )
+            .reset_index()
+        )
 
-        if cust_tx.empty:
-            st.error("❌ Customer ID not found.")
-            st.stop()
-
-        st.success(f"✅ Found {len(cust_tx)} transactions")
-
-        freq_table = cust_tx.groupby('Product').agg({
-            'Quantity': 'sum',
-            'Price': 'first'
-        }).reset_index()
-
-        # ✅ OFFER LOGIC FIXED
-        def offer_label(freq):
+        def get_offer(freq):
             if freq >= 5:
-                return f"🟢 Big Discount ({big_discount}%)"
+                return "Big Discount"
             elif freq >= 3:
-                return f"🟡 Medium Discount ({medium_discount}%)"
+                return "Medium Discount"
             elif freq >= 2:
-                return f"🟠 Small Discount ({small_discount}%)"
-            else:
-                return "🔴 No Offer"
+                return "Small Discount"
+            return "No Discount"
 
-        freq_table['Offer'] = freq_table['Quantity'].apply(offer_label)
+        billing["OfferType"] = billing["Frequency"].apply(get_offer)
 
-        invoice_rows = []
-        for _, r in freq_table.iterrows():
-            qty = int(r['Quantity'])
-            price = int(round(float(r['Price'])))
-            final_price = price * qty
+        billing["Discount%"] = billing["OfferType"].map({
+            "Big Discount": big_discount,
+            "Medium Discount": medium_discount,
+            "Small Discount": small_discount,
+            "No Discount": 0
+        })
 
-            # ✅ DISCOUNT APPLIED ONLY IF PRODUCT HAS OFFER
-            if "Big" in r['Offer']:
-                discount_amt = int((final_price * big_discount) / 100)
-            elif "Medium" in r['Offer']:
-                discount_amt = int((final_price * medium_discount) / 100)
-            elif "Small" in r['Offer']:
-                discount_amt = int((final_price * small_discount) / 100)
-            else:
-                discount_amt = 0
+        billing["Discount_Rs"] = (billing["Amount"] * billing["Discount%"] / 100).astype(int)
+        billing["FinalAmount"] = billing["Amount"] - billing["Discount_Rs"]
 
-            after_discount = final_price - discount_amt
+        st.subheader("📄 Product-wise Billing Table")
+        st.dataframe(
+            billing[["Product", "Frequency", "BoughtDates", "Qty", "Amount", "OfferType", "Discount_Rs", "FinalAmount"]],
+            use_container_width=True
+        )
 
-            invoice_rows.append([r['Product'], qty, price, final_price, r['Offer'], discount_amt, after_discount])
-
-        invoice_df = pd.DataFrame(invoice_rows,
-                                  columns=["Product", "Quantity", "UnitPrice(₹)", "FinalPrice(₹)",
-                                           "Offer", "DiscountAmount(₹)", "AfterDiscount(₹)"])
-
-        st.dataframe(invoice_df)
-
-        st.write(f"**Subtotal (₹):** {invoice_df['FinalPrice(₹)'].sum()}")
-        st.write(f"**Total Discount (₹):** {invoice_df['DiscountAmount(₹)'].sum()}")
-        st.write(f"**Grand Total (₹):** {invoice_df['AfterDiscount(₹)'].sum()}")
-
-        csv = invoice_df.to_csv(index=False).encode("utf-8")
-        st.download_button("⬇️ Download Invoice CSV", csv, "invoice.csv")
-
-else:
-    st.info("Upload a file to continue.")
+        st.subheader("📌 Billing Summary")
+        st.write(f"**Total Amount (Before Discount):** ₹{billing['Amount'].sum():,.2f}")
+        st.write(f"**Total Discount Applied:** ₹{billing['Discount_Rs'].sum():,.2f}")
+        st.write(f"**💰 Final Amount Payable:** **₹{billing['FinalAmount'].sum():,.2f}**")
