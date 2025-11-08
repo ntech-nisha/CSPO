@@ -217,3 +217,16 @@ if uploaded_file:
             }
         )
         st.plotly_chart(fig_pie, use_container_width=True)
+
+# --------------------------------------------------------------
+# ✅ Table: Products Under Offer (Only Discounted Items)
+# --------------------------------------------------------------
+st.subheader("🏷️ Products Under Offer")
+
+offer_products = billing[billing["OfferType"] != "No Discount"][["Product", "OfferType", "Discount%"]]
+
+if not offer_products.empty:
+    st.dataframe(offer_products, use_container_width=True)
+else:
+    st.info("No products under offer for this customer.")
+
