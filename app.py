@@ -14,7 +14,6 @@ import numpy as np
 from sklearn.preprocessing import StandardScaler
 from sklearn.cluster import KMeans
 import plotly.express as px
-from datetime import datetime
 
 st.set_page_config(page_title="Customer RFM + Billing (India)", layout="wide")
 st.title("🛍️ Customer RFM + Indian Billing Dashboard")
@@ -197,19 +196,6 @@ if uploaded_file:
         st.write(f"**Subtotal (₹):** {invoice_df['FinalPrice(₹)'].sum()}")
         st.write(f"**Total Discount (₹):** {invoice_df['DiscountAmount(₹)'].sum()}")
         st.write(f"**Grand Total (₹):** {invoice_df['AfterDiscount(₹)'].sum()}")
-
-        # Pie charts
-        st.subheader("Invoice Summary Visualization")
-
-        # Create a temporary DataFrame for the pie chart data
-        summary_data = pd.DataFrame({
-            'Category': ['Subtotal', 'Total Discount', 'Grand Total'],
-            'Amount': [invoice_df['FinalPrice(₹)'].sum(), invoice_df['DiscountAmount(₹)'].sum(), invoice_df['AfterDiscount(₹)'].sum()]
-        })
-
-        fig_pie = px.pie(summary_data, values='Amount', names='Category', title='Distribution of Invoice Amounts')
-        st.plotly_chart(fig_pie, use_container_width=True)
-
 
         csv = invoice_df.to_csv(index=False).encode("utf-8")
         st.download_button("⬇️ Download Invoice CSV", csv, "invoice.csv")
